@@ -33,6 +33,7 @@ final class FpsMeter {
     private static final long RESOLVE_EVERY_MS = 5000;
 
     private static final Pattern ACTIVITY = Pattern.compile("ACTIVITY\\s+([A-Za-z0-9_.]+)/");
+    private static final Pattern COMPONENT = Pattern.compile("\\s([A-Za-z][A-Za-z0-9_.]+)/");
     private static final Pattern NUM = Pattern.compile("\\d+(?:\\.\\d+)?");
 
     private static final ScheduledExecutorService KILLER =
@@ -41,6 +42,9 @@ final class FpsMeter {
                 t.setDaemon(true);
                 return t;
             });
+
+    /** Tanı için: son seçilen katman ve paket. */
+    static volatile String debugLayer, debugPkg;
 
     private final Context ctx;
     private String layer;
@@ -126,15 +130,31 @@ final class FpsMeter {
         fails = 0;
 
         String pkg = topPackage();
-        if (pkg == null) return;
+        debugPkg = pkg;
+
+        // Aday katmanlar: önce öndeki uygulamanın katmanları, yoksa tüm uygulama katmanları
+        List<String> cands = new ArrayList<>();
+        if (pkg != null) {
+            for (String l : all) {
+                l = l.trim();
+                if (l.contains(pkg)) cands.add(l);
+            }
+        }
+        if (cands.isEmpty()) {
+            for (String l : all) {
+                l = l.trim();
+                if (!l.contains("/") || !l.contains("#")) continue;
+                if (l.startsWith("Background for") || l.startsWith("Bounds for")) continue;
+                if (l.contains("com.android.systemui") || l.contains(ctx.getPackageName())) continue;
+                cands.add(l);
+            }
+        }
 
         String best = null;
         float bestFps = -1;
         int tested = 0;
-        for (String l : all) {
-            l = l.trim();
-            if (!l.contains(pkg)) continue;
-            if (++tested > 6) break;
+        for (String l : cands) {
+            if (++tested > 10) break;
             float f = measure(l);
             if (f > bestFps) {
                 bestFps = f;
@@ -142,11 +162,18 @@ final class FpsMeter {
             }
         }
         layer = best;
+        debugLayer = best;
     }
 
+    /** Öndeki uygulamanın paketi: önce activity top, olmazsa resumed activity satırı. */
     private String topPackage() {
-        for (String l : run(150, 2500, "dumpsys", "activity", "top")) {
+        for (String l : run(200, 2500, "dumpsys", "activity", "top")) {
             Matcher m = ACTIVITY.matcher(l);
+            if (m.find()) return m.group(1);
+        }
+        for (String l : run(600, 3000, "dumpsys", "activity", "activities")) {
+            if (!l.contains("ResumedActivity") && !l.contains("topResumedActivity")) continue;
+            Matcher m = COMPONENT.matcher(l);
             if (m.find()) return m.group(1);
         }
         return null;

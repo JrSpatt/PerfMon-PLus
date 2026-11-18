@@ -209,6 +209,13 @@ public class MainActivity extends Activity {
                 Support.fpsMode == FpsMeter.MODE_APP ? Theme.ACCENT : Theme.WARN));
         card.addView(fpsLine);
 
+        if (Support.fpsMode == FpsMeter.MODE_APP) {
+            String dl = FpsMeter.debugLayer;
+            TextView layerInfo = Ui.text(c, dl == null ? "—" : dl, 11, Theme.MUTED);
+            layerInfo.setPadding(0, 0, 0, Ui.dp(c, 4));
+            card.addView(layerInfo);
+        }
+
         if (!Support.dump) {
             Button copy = Ui.button(c, getString(R.string.grant_dump), Theme.SURFACE_HI, Theme.TEXT);
             copy.setOnClickListener(v -> {
