@@ -138,7 +138,7 @@ final class Monitor {
         if (wantFps && fpsMeter != null) {
             s.fps = fpsMeter.read();
         }
-        s.fpsMode = Support.fpsMode;
+        s.fpsMode = fpsMeter != null ? fpsMeter.lastMode : Support.fpsMode;
 
         if (wantMinBw) s.minCpuBw = Sysfs.readLong(Support.pMinCpuBw);
         if (wantCpuBw) s.cpuBw = Sysfs.readLong(Support.pCpuBw);
@@ -204,8 +204,9 @@ final class Monitor {
         if (bm == null) return;
         int cur = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
         if (cur == Integer.MIN_VALUE) return;
-        // Çoğu cihaz µA verir, bazıları mA
-        int ma = Math.abs(cur) >= 20000 ? cur / 1000 : cur;
+        // BatteryManager µA verir. 1000'in altındaki değerler (≈1 mA'den küçük) gerçekçi olmadığı
+        // için doğrudan mA kabul edilir; böylece düşük akımda 1000 kat sapma olmaz.
+        int ma = Math.abs(cur) < 1000 ? cur : cur / 1000;
         if (reverseCurrent) ma = -ma;
         s.currentMa = ma;
         if (mv > 0) s.powerW = Math.abs(ma) * (float) mv / 1_000_000f;

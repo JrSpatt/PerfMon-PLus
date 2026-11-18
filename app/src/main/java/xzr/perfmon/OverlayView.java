@@ -70,7 +70,7 @@ final class OverlayView extends LinearLayout {
     private void buildRows(Context c) {
         if (Prefs.on(Prefs.FPS, true) && Support.fps) {
             addRow(c, null, s -> s.fps < 0 ? "--" : String.format(Locale.US, "%.0f", s.fps),
-                    s -> s.fpsMode == FpsMeter.MODE_HZ ? "Hz" : "FPS");
+                    s -> s.fpsMode == FpsMeter.MODE_HZ ? "Hz" : s.fpsMode == FpsMeter.MODE_PANEL ? "PNL" : "FPS");
         }
 
         if (showFreq || showLoad) {

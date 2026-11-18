@@ -13,9 +13,12 @@ final class CpuTopology {
     static String[] labels = {"CPU"};
 
     static void probe() {
-        count = countCpus();
-        clusters = detectClusters();
-        labels = makeLabels(clusters.length);
+        int n = countCpus();
+        int[][] cl = detectClusters(n);
+        String[] lb = makeLabels(cl.length);
+        clusters = cl;
+        labels = lb;
+        count = n;
     }
 
     private static int countCpus() {
@@ -32,7 +35,7 @@ final class CpuTopology {
         return max + 1;
     }
 
-    private static int[][] detectClusters() {
+    private static int[][] detectClusters(int count) {
         Map<String, List<Integer>> groups = new LinkedHashMap<>();
 
         // Çevrimdışı çekirdekleri de kapsadığı için policy dizinleri en güvenilir kaynak

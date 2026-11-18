@@ -1,6 +1,7 @@
 package xzr.perfmon;
 
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.hardware.display.DisplayManager;
 import android.os.SystemClock;
 import android.view.Display;
@@ -8,6 +9,7 @@ import android.view.Display;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -17,10 +19,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * FPS kaynakları (en iyiden en basite):
- * 1) APP: DUMP izniyle dumpsys SurfaceFlinger --latency (öndeki uygulamanın gerçek FPS'i, rootsuz)
- * 2) PANEL: sysfs measured_fps (ekran hattı FPS'i, çoğu cihazda SELinux engeller)
- * 3) HZ: ekranın o anki yenileme hızı
+ * FPS kaynakları, her turda sırayla denenir:
+ * 1) APP: DUMP izniyle dumpsys SurfaceFlinger --latency (öndeki uygulamanın gerçek FPS'i)
+ * 2) PANEL: sysfs measured_fps (ekran hattı FPS'i)
+ * 3) HZ: yalnızca yukarıdakilerin hiçbiri mümkün değilse ekranın yenileme hızı
+ * Geçersiz / doğrulanamayan ölçüm 0 değil -1 döner ve ekranda "--" görünür.
  */
 final class FpsMeter {
     static final int MODE_APP = 1, MODE_PANEL = 2, MODE_HZ = 3;
@@ -31,6 +34,7 @@ final class FpsMeter {
     };
     private static final String PERM_DUMP = "android.permission.DUMP";
     private static final long RESOLVE_EVERY_MS = 5000;
+    private static final long WINDOW_NS = 1_000_000_000L;
 
     private static final Pattern ACTIVITY = Pattern.compile("ACTIVITY\\s+([A-Za-z0-9_.]+)/");
     private static final Pattern COMPONENT = Pattern.compile("\\s([A-Za-z][A-Za-z0-9_.]+)/");
@@ -47,19 +51,22 @@ final class FpsMeter {
     static volatile String debugLayer, debugPkg;
 
     private final Context ctx;
+    /** Son okumada hangi kaynağın değer verdiği (etiket için). */
+    volatile int lastMode = MODE_HZ;
+
     private String layer;
     private long resolvedAt;
     private boolean cmdFail;
     private int fails;
+    private boolean appDisabled;
 
     FpsMeter(Context ctx) {
         this.ctx = ctx.getApplicationContext();
     }
 
-    /** DUMP iznini ve en iyi kullanılabilir kaynağı belirler. Süreç başlattığı için arka planda çağır. */
+    /** İzni ve en iyi kullanılabilir kaynağı belirler (kartta gösterilir). Arka planda çağır. */
     static void detect(Context ctx) {
-        Support.dump = ctx.checkSelfPermission(PERM_DUMP)
-                == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        Support.dump = ctx.checkSelfPermission(PERM_DUMP) == PackageManager.PERMISSION_GRANTED;
         if (Support.dump && layersAvailable()) {
             Support.fpsMode = MODE_APP;
         } else if (panelValue() >= 0) {
@@ -78,19 +85,27 @@ final class FpsMeter {
     }
 
     float read() {
-        switch (Support.fpsMode) {
-            case MODE_APP: {
-                float f = readApp();
-                if (cmdFail && ++fails >= 3) {
-                    Support.fpsMode = panelValue() >= 0 ? MODE_PANEL : MODE_HZ;
-                }
+        boolean appPossible = Support.dump && !appDisabled;
+        if (appPossible) {
+            float f = readApp();
+            if (f >= 0) {
+                lastMode = MODE_APP;
+                fails = 0;
                 return f;
             }
-            case MODE_PANEL:
-                return panelValue();
-            default:
-                return displayHz();
+            if (cmdFail && ++fails >= 3) appDisabled = true;
         }
+        float p = panelValue();
+        if (p >= 0) {
+            lastMode = MODE_PANEL;
+            return p;
+        }
+        if (!appPossible) {
+            lastMode = MODE_HZ;
+            return displayHz();
+        }
+        lastMode = MODE_APP;
+        return -1;
     }
 
     private float displayHz() {
@@ -114,54 +129,40 @@ final class FpsMeter {
     private float readApp() {
         long now = SystemClock.elapsedRealtime();
         if (layer == null || now - resolvedAt > RESOLVE_EVERY_MS) resolve(now);
-        if (cmdFail) return -1;
-        return layer == null ? -1 : measure(layer);
+        if (cmdFail || layer == null) return -1;
+        return measure(layer);
     }
 
+    /** Yalnızca öndeki uygulamanın katmanları aranır; paket veya katman doğrulanamazsa ölçüm yok. */
     private void resolve(long now) {
         resolvedAt = now;
         layer = null;
+        debugLayer = null;
         List<String> all = run(0, 2500, "dumpsys", "SurfaceFlinger", "--list");
         if (all.isEmpty() || all.get(0).startsWith("Permission Denial")) {
             cmdFail = true;
             return;
         }
         cmdFail = false;
-        fails = 0;
 
         String pkg = topPackage();
         debugPkg = pkg;
-
-        // Aday katmanlar: önce öndeki uygulamanın katmanları, yoksa tüm uygulama katmanları
-        List<String> cands = new ArrayList<>();
-        if (pkg != null) {
-            for (String l : all) {
-                l = l.trim();
-                if (l.contains(pkg)) cands.add(l);
-            }
-        }
-        if (cands.isEmpty()) {
-            for (String l : all) {
-                l = l.trim();
-                if (!l.contains("/") || !l.contains("#")) continue;
-                if (l.startsWith("Background for") || l.startsWith("Bounds for")) continue;
-                if (l.contains("com.android.systemui") || l.contains(ctx.getPackageName())) continue;
-                cands.add(l);
-            }
-        }
+        if (pkg == null) return;
 
         String best = null;
         float bestFps = -1;
         int tested = 0;
-        for (String l : cands) {
-            if (++tested > 10) break;
+        for (String l : all) {
+            l = l.trim();
+            if (!l.contains(pkg)) continue;
+            if (++tested > 8) break;
             float f = measure(l);
             if (f > bestFps) {
                 bestFps = f;
                 best = l;
             }
         }
-        layer = best;
+        layer = best; // hiçbirinden geçerli ölçüm gelmediyse null kalır
         debugLayer = best;
     }
 
@@ -172,38 +173,48 @@ final class FpsMeter {
             if (m.find()) return m.group(1);
         }
         for (String l : run(600, 3000, "dumpsys", "activity", "activities")) {
-            if (!l.contains("ResumedActivity") && !l.contains("topResumedActivity")) continue;
+            if (!l.contains("ResumedActivity")) continue;
             Matcher m = COMPONENT.matcher(l);
             if (m.find()) return m.group(1);
         }
         return null;
     }
 
-    /** Katmanın son 1 saniyedeki sunulan kare sayısı. */
+    /**
+     * Katmanın FPS'i: geçerli kare zamanları arasındaki süreden hesaplanır.
+     * SurfaceFlinger geçmişi en fazla ~127 kare tuttuğu için 1 sn'de sayım 144/165 FPS'te taşar;
+     * bu yüzden (kare sayısı - 1) / (ilk ile son kare arası süre) kullanılır.
+     * Geçersiz yanıtta -1, ekran durağansa 0 döner.
+     */
     private float measure(String layerName) {
         List<String> lines = run(0, 2500, "dumpsys", "SurfaceFlinger", "--latency", layerName);
-        if (lines.size() < 2) return 0;
+        if (lines.size() < 2 || lines.get(0).startsWith("Permission Denial")) return -1;
+
         long now = System.nanoTime();
-        long latest = 0;
         List<Long> ts = new ArrayList<>(lines.size());
         for (int i = 1; i < lines.size(); i++) {
             String[] p = lines.get(i).trim().split("\\s+");
             if (p.length < 3) continue;
             try {
                 long t = Long.parseLong(p[1]);
-                if (t <= 0 || t == Long.MAX_VALUE) continue;
-                ts.add(t);
-                if (t > latest) latest = t;
+                if (t > 0 && t != Long.MAX_VALUE) ts.add(t);
             } catch (NumberFormatException ignored) {
             }
         }
-        if (ts.isEmpty()) return 0;
-        // Saatler aynıysa ve son kare 1,2 sn'den eskiyse ekran durağandır
+        if (ts.isEmpty()) return -1;
+        Collections.sort(ts);
+        long latest = ts.get(ts.size() - 1);
+
+        // Son kare 1,2 sn'den eskiyse ekran durağandır
         if (latest <= now && now - latest > 1_200_000_000L) return 0;
-        int count = 0;
-        for (long t : ts)
-            if (t > latest - 1_000_000_000L) count++;
-        return count;
+
+        int first = ts.size() - 1;
+        while (first > 0 && ts.get(first - 1) > latest - WINDOW_NS) first--;
+        int n = ts.size() - first;
+        if (n < 2) return 0;
+        long span = latest - ts.get(first);
+        if (span <= 0) return -1;
+        return (n - 1) * 1_000_000_000f / span;
     }
 
     // ------------------------------------------------------------ süreç yardımcı

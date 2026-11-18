@@ -321,15 +321,19 @@ public class MainActivity extends Activity {
 
     private void grantWithRoot() {
         new Thread(() -> {
-            String msg;
+            boolean ok = false;
             try {
                 Process p = new ProcessBuilder("su", "-c", GRANT_CMD).redirectErrorStream(true).start();
-                p.waitFor();
-                msg = getString(R.string.granted);
-            } catch (Exception e) {
-                msg = getString(R.string.permission_denied);
+                BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
+                while (r.readLine() != null) {
+                    // çıktıyı boşalt
+                }
+                int code = p.waitFor();
+                FpsMeter.detect(getApplicationContext());
+                ok = code == 0 && Support.dump;
+            } catch (Exception ignored) {
             }
-            final String m = msg;
+            final String m = getString(ok ? R.string.granted : R.string.permission_denied);
             runOnUiThread(() -> Toast.makeText(this, m, Toast.LENGTH_SHORT).show());
             refreshAsync();
         }).start();
