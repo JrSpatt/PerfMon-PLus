@@ -1,0 +1,29 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'xzr.perfmon'
+    compileSdk 33
+
+    defaultConfig {
+        applicationId "xzr.perfmon"
+        minSdk 24
+        targetSdk 33
+        versionCode 20
+        versionName "2.0.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Kişisel kullanım: release APK debug anahtarıyla imzalanır, doğrudan kurulabilir
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
