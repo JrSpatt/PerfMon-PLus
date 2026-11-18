@@ -54,7 +54,7 @@ final class Monitor {
         wantLlcBw = Prefs.on(Prefs.LLCBW, false) && Support.llcBw;
         wantM4m = Prefs.on(Prefs.M4M, false) && Support.m4m;
 
-        int n = CpuTopology.count;
+        int n = CpuTopology.get().count;
         freqPaths = new String[n];
         onlinePaths = new String[n];
         for (int i = 0; i < n; i++) {
@@ -99,7 +99,7 @@ final class Monitor {
 
     private Snapshot sample() {
         Snapshot s = new Snapshot();
-        int n = CpuTopology.count;
+        int n = CpuTopology.get().count;
         s.cpuOnline = new int[n];
         s.cpuFreq = new int[n];
         s.cpuLoad = new int[n];
@@ -204,11 +204,9 @@ final class Monitor {
         if (bm == null) return;
         int cur = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
         if (cur == Integer.MIN_VALUE) return;
-        // BatteryManager µA verir. 1000'in altındaki değerler (≈1 mA'den küçük) gerçekçi olmadığı
-        // için doğrudan mA kabul edilir; böylece düşük akımda 1000 kat sapma olmaz.
-        int ma = Math.abs(cur) < 1000 ? cur : cur / 1000;
-        if (reverseCurrent) ma = -ma;
-        s.currentMa = ma;
-        if (mv > 0) s.powerW = Math.abs(ma) * (float) mv / 1_000_000f;
+        // BatteryManager akımı µA olarak tanımlar; dönüşüm standart (µA / 1000 = mA)
+        if (reverseCurrent) cur = -cur;
+        s.currentMa = Math.round(cur / 1000f);
+        if (mv > 0) s.powerW = Math.abs((float) cur) * mv / 1_000_000_000f;
     }
 }

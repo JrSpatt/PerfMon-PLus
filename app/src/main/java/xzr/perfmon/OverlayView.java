@@ -64,6 +64,8 @@ final class OverlayView extends LinearLayout {
         head.addView(close);
         addView(head);
 
+        if (Prefs.on(Prefs.LOCK, false)) close.setVisibility(View.GONE);
+
         buildRows(c);
     }
 
@@ -74,14 +76,15 @@ final class OverlayView extends LinearLayout {
         }
 
         if (showFreq || showLoad) {
-            boolean group = Prefs.on(Prefs.GROUP, true) && CpuTopology.clusters.length > 1;
+            CpuTopology.Data topo = CpuTopology.get();
+            boolean group = Prefs.on(Prefs.GROUP, true) && topo.clusters.length > 1;
             if (group) {
-                for (int k = 0; k < CpuTopology.clusters.length; k++) {
-                    final int[] cpus = CpuTopology.clusters[k];
-                    addRow(c, CpuTopology.labels[k], s -> clusterText(s, cpus), null);
+                for (int k = 0; k < topo.clusters.length; k++) {
+                    final int[] cpus = topo.clusters[k];
+                    addRow(c, topo.labels[k], s -> clusterText(s, cpus), null);
                 }
             } else {
-                for (int i = 0; i < CpuTopology.count; i++) {
+                for (int i = 0; i < topo.count; i++) {
                     final int id = i;
                     addRow(c, "cpu" + i, s -> clusterText(s, new int[]{id}), null);
                 }

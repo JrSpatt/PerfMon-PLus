@@ -16,16 +16,16 @@
 
     <string name="cpu_freq">CPU frekansı</string>
     <string name="cpu_load">CPU yükü</string>
-    <string name="gpu">GPU frekansı ve yükü</string>
+    <string name="gpu">GPU</string>
     <string name="cpu_temp">CPU sıcaklığı</string>
     <string name="ram">RAM kullanımı</string>
-    <string name="power">Güç (W / mA)</string>
+    <string name="power">Güç (W)</string>
     <string name="batt_temp">Pil sıcaklığı</string>
     <string name="fps">FPS</string>
-    <string name="group_clusters">Çekirdekleri kümeye göre grupla</string>
+    <string name="group_clusters">Kümelere ayır</string>
 
     <string name="refresh_interval">Yenileme aralığı</string>
-    <string name="ui_scale">Boyut</string>
+    <string name="ui_scale">Yazı boyutu</string>
     <string name="opacity">Saydamlık</string>
     <string name="reverse_current">Akım işaretini ters çevir</string>
 
@@ -44,13 +44,10 @@
     <string name="cancel">İptal</string>
 
     <string name="fps_src">FPS kaynağı</string>
-    <string name="fps_src_app">Uygulama (DUMP)</string>
+    <string name="fps_src_app">Uygulama (DUMP izni)</string>
+    <string name="fps_src_shizuku">Uygulama (Shizuku)</string>
     <string name="fps_src_panel">Ekran paneli</string>
     <string name="fps_src_hz">Ekran Hz\'i</string>
-    <string name="grant_dump">DUMP iznini ver (komutu kopyala)</string>
-    <string name="grant_root">Root ile ver</string>
-    <string name="copied">Komut kopyalandı</string>
-    <string name="granted">DUMP izni verildi</string>
 
     <string name="offline">uykuda</string>
     <string name="about_origin">PerfMon+ — LibXZR tarafından geliştirilen açık kaynak proje</string>
@@ -59,4 +56,14 @@
     <string name="about_translated">Türkçeleştirildi: </string>
     <string name="about_translator">@al1deburdanyak</string>
     <string name="about_version">Sürüm %s</string>
+    <string name="sec_preview">Önizleme ve konum</string>
+    <string name="lock_pos">Konumu kilitle (dokunuşlar oyuna geçer)</string>
+    <string name="drag_hint">Kutuyu sürükleyerek konumu seç</string>
+    <string name="shizuku">Shizuku</string>
+    <string name="shz_off">Çalışmıyor</string>
+    <string name="shz_need">İzin gerekli</string>
+    <string name="shz_wait">Bağlanıyor</string>
+    <string name="shz_on">Bağlı</string>
+    <string name="shz_request">Shizuku izni iste</string>
+    <string name="shz_open">Shizuku\'yu aç</string>
 </resources>

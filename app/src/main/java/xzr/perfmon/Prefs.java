@@ -16,6 +16,7 @@ final class Prefs {
     static final String POS_Y = "pos_y";
     static final String REVERSE_CURRENT = "reverse_current";
     static final String GROUP = "group_clusters";
+    static final String LOCK = "lock_pos";
 
     static final String CPUFREQ = "show_cpufreq";
     static final String CPULOAD = "show_cpuload";

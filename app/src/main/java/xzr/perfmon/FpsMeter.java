@@ -33,7 +33,7 @@ final class FpsMeter {
             "/sys/class/drm/sde-crtc-0/measured_fps"
     };
     private static final String PERM_DUMP = "android.permission.DUMP";
-    private static final long RESOLVE_EVERY_MS = 5000;
+    private static final long RESOLVE_EVERY_MS = 3000;
     private static final long WINDOW_NS = 1_000_000_000L;
 
     private static final Pattern ACTIVITY = Pattern.compile("ACTIVITY\\s+([A-Za-z0-9_.]+)/");
@@ -59,6 +59,8 @@ final class FpsMeter {
     private boolean cmdFail;
     private int fails;
     private boolean appDisabled;
+    private int zeros;
+    private int seenGeneration = -1;
 
     FpsMeter(Context ctx) {
         this.ctx = ctx.getApplicationContext();
@@ -67,7 +69,8 @@ final class FpsMeter {
     /** İzni ve en iyi kullanılabilir kaynağı belirler (kartta gösterilir). Arka planda çağır. */
     static void detect(Context ctx) {
         Support.dump = ctx.checkSelfPermission(PERM_DUMP) == PackageManager.PERMISSION_GRANTED;
-        if (Support.dump && layersAvailable()) {
+        Support.shizuku = ShizukuBridge.service != null;
+        if (shellAvailable() && layersAvailable()) {
             Support.fpsMode = MODE_APP;
         } else if (panelValue() >= 0) {
             Support.fpsMode = MODE_PANEL;
@@ -84,8 +87,21 @@ final class FpsMeter {
         return false;
     }
 
+    /** dumpsys çalıştırabilecek bir yol var mı: Shizuku servisi veya doğrudan DUMP izni. */
+    private static boolean shellAvailable() {
+        return ShizukuBridge.service != null || Support.dump;
+    }
+
     float read() {
-        boolean appPossible = Support.dump && !appDisabled;
+        int gen = ShizukuBridge.generation;
+        if (gen != seenGeneration) { // Shizuku (yeniden) bağlandı: eski hata durumunu sıfırla
+            seenGeneration = gen;
+            appDisabled = false;
+            fails = 0;
+            layer = null;
+        }
+        Support.shizuku = ShizukuBridge.service != null;
+        boolean appPossible = shellAvailable() && !appDisabled;
         if (appPossible) {
             float f = readApp();
             if (f >= 0) {
@@ -130,7 +146,17 @@ final class FpsMeter {
         long now = SystemClock.elapsedRealtime();
         if (layer == null || now - resolvedAt > RESOLVE_EVERY_MS) resolve(now);
         if (cmdFail || layer == null) return -1;
-        return measure(layer);
+        float f = measure(layer);
+        // Üst üste sıfır: uygulama değişmiş olabilir, katmanı hemen yeniden bul
+        if (f == 0) {
+            if (++zeros >= 2) {
+                zeros = 0;
+                resolvedAt = 0;
+            }
+        } else {
+            zeros = 0;
+        }
+        return f;
     }
 
     /** Yalnızca öndeki uygulamanın katmanları aranır; paket veya katman doğrulanamazsa ölçüm yok. */
@@ -149,12 +175,14 @@ final class FpsMeter {
         debugPkg = pkg;
         if (pkg == null) return;
 
+        // "com.game" yalnızca "com.game/..." ile eşleşir, "com.game.beta/..." ile değil
+        Pattern own = Pattern.compile("(?:^|[^A-Za-z0-9_.])" + Pattern.quote(pkg) + "/");
         String best = null;
         float bestFps = -1;
         int tested = 0;
         for (String l : all) {
             l = l.trim();
-            if (!l.contains(pkg)) continue;
+            if (!own.matcher(l).find()) continue;
             if (++tested > 8) break;
             float f = measure(l);
             if (f > bestFps) {
@@ -201,7 +229,7 @@ final class FpsMeter {
             } catch (NumberFormatException ignored) {
             }
         }
-        if (ts.isEmpty()) return -1;
+        if (ts.size() < 2) return -1; // tek kareden hız hesaplanamaz
         Collections.sort(ts);
         long latest = ts.get(ts.size() - 1);
 
@@ -211,7 +239,10 @@ final class FpsMeter {
         int first = ts.size() - 1;
         while (first > 0 && ts.get(first - 1) > latest - WINDOW_NS) first--;
         int n = ts.size() - first;
-        if (n < 2) return 0;
+        if (n < 2) { // son 1 sn'de tek kare: iki son kare arasından hesapla
+            long gap = latest - ts.get(ts.size() - 2);
+            return gap > 0 ? 1_000_000_000f / gap : -1;
+        }
         long span = latest - ts.get(first);
         if (span <= 0) return -1;
         return (n - 1) * 1_000_000_000f / span;
@@ -219,8 +250,24 @@ final class FpsMeter {
 
     // ------------------------------------------------------------ süreç yardımcı
 
-    /** Komutu çalıştırır; zaman aşımında öldürür. maxLines>0 ise o kadar satırdan sonra keser. */
+    /** Önce Shizuku (shell yetkisi), yoksa doğrudan DUMP izniyle yerel çalıştırma; ikisi de yoksa boş liste. */
     private static List<String> run(int maxLines, int timeoutMs, String... cmd) {
+        IShellService s = ShizukuBridge.service;
+        if (s != null) {
+            try {
+                String out = s.exec(cmd, maxLines, timeoutMs);
+                List<String> l = new ArrayList<>();
+                if (out != null && !out.isEmpty()) Collections.addAll(l, out.split("\n"));
+                return l;
+            } catch (Exception ignored) {
+                // servis koptuysa yerel yola düş
+            }
+        }
+        if (!Support.dump) return new ArrayList<>();
+        return runLocal(maxLines, timeoutMs, cmd);
+    }
+
+    private static List<String> runLocal(int maxLines, int timeoutMs, String... cmd) {
         List<String> out = new ArrayList<>();
         Process p = null;
         ScheduledFuture<?> killer = null;

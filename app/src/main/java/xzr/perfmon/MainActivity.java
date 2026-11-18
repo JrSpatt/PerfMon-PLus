@@ -2,10 +2,10 @@ package xzr.perfmon;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -16,10 +16,13 @@ import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.method.LinkMovementMethod;
 import android.text.style.URLSpan;
+import android.util.DisplayMetrics;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -30,15 +33,21 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 
 public class MainActivity extends Activity {
-    private static final String GRANT_CMD = "pm grant xzr.perfmon android.permission.DUMP";
-
     private ScrollView scroll;
     private final Handler handler = new Handler(Looper.getMainLooper());
+
+    // Önizleme ve konum seçici
+    private FrameLayout stage, phone;
+    private View posChip;
+    private OverlayView previewView;
+    private Monitor previewMonitor;
+    private int chipW, chipH;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Prefs.init(this);
+        ShizukuBridge.init(this);
         scroll = new ScrollView(this);
         scroll.setBackgroundColor(Theme.BG);
         setContentView(scroll);
@@ -47,7 +56,15 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        ShizukuBridge.onChange = this::refreshAsync;
         refreshAsync();
+    }
+
+    @Override
+    protected void onPause() {
+        ShizukuBridge.onChange = null;
+        stopPreview();
+        super.onPause();
     }
 
     /** Destek taraması (dumpsys çağırabildiği için) arka planda yapılır, sonra ekran yeniden kurulur. */
@@ -63,6 +80,7 @@ public class MainActivity extends Activity {
         if (isFinishing() || isDestroyed()) return;
         final Context c = this;
         final int pad = Ui.dp(c, 16);
+        stopPreview();
 
         LinearLayout root = new LinearLayout(c);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -70,14 +88,24 @@ public class MainActivity extends Activity {
 
         root.addView(header(c));
         root.addView(startButton(c));
+        root.addView(previewCard(c));
         root.addView(monitorCard(c));
         root.addView(windowCard(c));
         root.addView(advancedCard(c));
         root.addView(compatCard(c));
         root.addView(aboutCard(c));
 
+        int y = scroll.getScrollY();
         scroll.removeAllViews();
         scroll.addView(root);
+        scroll.post(() -> scroll.scrollTo(0, y));
+        startPreview();
+    }
+
+    /** Ayar değişince çalışan monitörü yeniler ve önizlemeyi tazeler. */
+    private void onSettingChanged() {
+        FloatingWindow.reload(this);
+        startPreview();
     }
 
     // ------------------------------------------------------------------ bölümler
@@ -85,7 +113,7 @@ public class MainActivity extends Activity {
     private View header(Context c) {
         LinearLayout row = Ui.row(c);
         TextView title = Ui.text(c, getString(R.string.app_name), 26, Theme.TEXT);
-        title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
         row.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
         boolean on = FloatingWindow.running;
@@ -113,37 +141,131 @@ public class MainActivity extends Activity {
         return b;
     }
 
+    /** Canlı önizleme (gerçek veriyle, gerçek boyutta) ve sürüklenebilir konum haritası. */
+    private View previewCard(Context c) {
+        LinearLayout card = Ui.card(c, getString(R.string.sec_preview));
+
+        stage = new FrameLayout(c);
+        stage.setBackground(Ui.round(c, 0xFF0B0D10, 12));
+        int sp = Ui.dp(c, 10);
+        stage.setPadding(sp, sp, sp, sp);
+        card.addView(stage, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        final int pw = Ui.dp(c, 110);
+        final int ph = Math.round(pw * (float) dm.heightPixels / dm.widthPixels);
+        final float ratio = pw / (float) dm.widthPixels;
+
+        phone = new FrameLayout(c);
+        GradientDrawable frame = Ui.round(c, Theme.BG, 14);
+        frame.setStroke(Ui.dp(c, 2), Theme.SURFACE_HI);
+        phone.setBackground(frame);
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(pw, ph);
+        plp.gravity = Gravity.CENTER_HORIZONTAL;
+        plp.topMargin = Ui.dp(c, 14);
+        card.addView(phone, plp);
+
+        posChip = new View(c);
+        posChip.setBackground(Ui.round(c, 0xCC4CD08A, 3));
+        phone.addView(posChip, new FrameLayout.LayoutParams(Ui.dp(c, 30), Ui.dp(c, 20)));
+
+        phone.setOnTouchListener((v, e) -> {
+            int a = e.getActionMasked();
+            if (a == MotionEvent.ACTION_DOWN) v.getParent().requestDisallowInterceptTouchEvent(true);
+            if (a != MotionEvent.ACTION_DOWN && a != MotionEvent.ACTION_MOVE && a != MotionEvent.ACTION_UP)
+                return false;
+            float cx = Math.max(0, Math.min(e.getX() - chipW / 2f, pw - chipW));
+            float cy = Math.max(0, Math.min(e.getY() - chipH / 2f, ph - chipH));
+            posChip.setX(cx);
+            posChip.setY(cy);
+            if (a == MotionEvent.ACTION_UP) {
+                Prefs.sp.edit().putInt(Prefs.POS_X, Math.round(cx / ratio))
+                        .putInt(Prefs.POS_Y, Math.round(cy / ratio)).apply();
+                FloatingWindow.reload(this);
+            }
+            return true;
+        });
+
+        TextView hint = Ui.text(c, getString(R.string.drag_hint), 12, Theme.MUTED);
+        hint.setGravity(Gravity.CENTER_HORIZONTAL);
+        hint.setPadding(0, Ui.dp(c, 8), 0, Ui.dp(c, 4));
+        card.addView(hint);
+        return card;
+    }
+
+    private void startPreview() {
+        if (stage == null || isFinishing() || isDestroyed()) return;
+        stopPreview();
+        stage.removeAllViews();
+        previewView = new OverlayView(this);
+        stage.addView(previewView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        final OverlayView pv = previewView;
+        previewMonitor = new Monitor(this, s -> pv.update(s));
+        previewMonitor.start();
+        placeChip();
+    }
+
+    private void stopPreview() {
+        if (previewMonitor != null) {
+            previewMonitor.stop();
+            previewMonitor = null;
+        }
+    }
+
+    /** Konum kutusunun boyutunu önizlemeye, yerini kayıtlı konuma göre ayarlar. */
+    private void placeChip() {
+        if (previewView == null || phone == null || posChip == null) return;
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        previewView.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+        final int pw = Ui.dp(this, 110);
+        final int ph = Math.round(pw * (float) dm.heightPixels / dm.widthPixels);
+        final float ratio = pw / (float) dm.widthPixels;
+        chipW = Math.min(pw, Math.max(Ui.dp(this, 14), Math.round(previewView.getMeasuredWidth() * ratio)));
+        chipH = Math.min(ph, Math.max(Ui.dp(this, 10), Math.round(previewView.getMeasuredHeight() * ratio)));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(chipW, chipH);
+        posChip.setLayoutParams(lp);
+        int x = Prefs.sp.getInt(Prefs.POS_X, Ui.dp(this, 16));
+        int y = Prefs.sp.getInt(Prefs.POS_Y, Ui.dp(this, 80));
+        posChip.setX(Math.max(0, Math.min(x * ratio, pw - chipW)));
+        posChip.setY(Math.max(0, Math.min(y * ratio, ph - chipH)));
+    }
+
     private View monitorCard(Context c) {
         LinearLayout card = Ui.card(c, getString(R.string.sec_monitor));
-        Runnable r = () -> FloatingWindow.reload(this);
+        Runnable r = this::onSettingChanged;
 
-        card.addView(Ui.toggle(c, getString(R.string.fps), Prefs.FPS, true, r));
+        java.util.List<View> items = new java.util.ArrayList<>();
+        items.add(Ui.toggle(c, getString(R.string.fps), Prefs.FPS, true, r));
         if (Support.cpuFreq)
-            card.addView(Ui.toggle(c, getString(R.string.cpu_freq), Prefs.CPUFREQ, true, r));
+            items.add(Ui.toggle(c, getString(R.string.cpu_freq), Prefs.CPUFREQ, true, r));
         if (Support.cpuLoad)
-            card.addView(Ui.toggle(c, getString(R.string.cpu_load), Prefs.CPULOAD, true, r));
+            items.add(Ui.toggle(c, getString(R.string.cpu_load), Prefs.CPULOAD, true, r));
         if (Support.cpuFreq || Support.cpuLoad)
-            card.addView(Ui.toggle(c, getString(R.string.group_clusters), Prefs.GROUP, true, r));
+            items.add(Ui.toggle(c, getString(R.string.group_clusters), Prefs.GROUP, true, r));
         if (Support.gpuFreq || Support.gpuLoad)
-            card.addView(Ui.toggle(c, getString(R.string.gpu), Prefs.GPU, true, r));
+            items.add(Ui.toggle(c, getString(R.string.gpu), Prefs.GPU, true, r));
         if (Support.temp)
-            card.addView(Ui.toggle(c, getString(R.string.cpu_temp), Prefs.TEMP, true, r));
-        card.addView(Ui.toggle(c, getString(R.string.ram), Prefs.MEM, true, r));
+            items.add(Ui.toggle(c, getString(R.string.cpu_temp), Prefs.TEMP, true, r));
+        items.add(Ui.toggle(c, getString(R.string.ram), Prefs.MEM, true, r));
         if (Support.power)
-            card.addView(Ui.toggle(c, getString(R.string.power), Prefs.POWER, true, r));
-        card.addView(Ui.toggle(c, getString(R.string.batt_temp), Prefs.BATT, true, r));
+            items.add(Ui.toggle(c, getString(R.string.power), Prefs.POWER, true, r));
+        items.add(Ui.toggle(c, getString(R.string.batt_temp), Prefs.BATT, true, r));
+        card.addView(Ui.grid(c, items, 2));
         return card;
     }
 
     private View windowCard(Context c) {
         LinearLayout card = Ui.card(c, getString(R.string.sec_window));
-        Runnable r = () -> FloatingWindow.reload(this);
+        Runnable r = this::onSettingChanged;
         card.addView(Ui.slider(c, getString(R.string.refresh_interval), Prefs.DELAY,
                 250, 3000, 250, Prefs.DELAY_DEF, "ms", r));
         card.addView(Ui.slider(c, getString(R.string.ui_scale), Prefs.SCALE,
                 70, 150, 5, Prefs.SCALE_DEF, "%", r));
         card.addView(Ui.slider(c, getString(R.string.opacity), Prefs.ALPHA,
                 20, 100, 5, Prefs.ALPHA_DEF, "%", r));
+        card.addView(Ui.toggle(c, getString(R.string.lock_pos), Prefs.LOCK, false, r));
         if (Support.power)
             card.addView(Ui.toggle(c, getString(R.string.reverse_current), Prefs.REVERSE_CURRENT, false, r));
         return card;
@@ -151,7 +273,7 @@ public class MainActivity extends Activity {
 
     private View advancedCard(Context c) {
         LinearLayout card = Ui.card(c, getString(R.string.sec_advanced));
-        Runnable r = () -> FloatingWindow.reload(this);
+        Runnable r = this::onSettingChanged;
         if (Support.minCpuBw)
             card.addView(Ui.toggle(c, getString(R.string.bw_min_cpu), Prefs.MINCPUBW, false, r));
         if (Support.cpuBw)
@@ -187,7 +309,7 @@ public class MainActivity extends Activity {
         LinearLayout card = Ui.card(c, getString(R.string.sec_compat));
 
         String[] names = {getString(R.string.cpu_freq), getString(R.string.cpu_load),
-                "GPU " + "MHz", "GPU %", getString(R.string.cpu_temp), getString(R.string.ram),
+                "GPU MHz", "GPU %", getString(R.string.cpu_temp), getString(R.string.ram),
                 getString(R.string.power), getString(R.string.batt_temp)};
         boolean[] ok = {Support.cpuFreq, Support.cpuLoad, Support.gpuFreq, Support.gpuLoad,
                 Support.temp, true, Support.power, true};
@@ -199,15 +321,11 @@ public class MainActivity extends Activity {
         }
 
         // FPS kaynağı
-        int srcRes = Support.fpsMode == FpsMeter.MODE_APP ? R.string.fps_src_app
+        int srcRes = Support.fpsMode == FpsMeter.MODE_APP
+                ? (Support.shizuku ? R.string.fps_src_shizuku : R.string.fps_src_app)
                 : Support.fpsMode == FpsMeter.MODE_PANEL ? R.string.fps_src_panel : R.string.fps_src_hz;
-        LinearLayout fpsLine = Ui.row(c);
-        fpsLine.setPadding(0, Ui.dp(c, 8), 0, Ui.dp(c, 4));
-        fpsLine.addView(Ui.text(c, getString(R.string.fps_src), 14, Theme.TEXT),
-                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        fpsLine.addView(Ui.text(c, getString(srcRes), 14,
+        card.addView(infoRow(c, getString(R.string.fps_src), getString(srcRes),
                 Support.fpsMode == FpsMeter.MODE_APP ? Theme.ACCENT : Theme.WARN));
-        card.addView(fpsLine);
 
         if (Support.fpsMode == FpsMeter.MODE_APP) {
             String dl = FpsMeter.debugLayer;
@@ -216,20 +334,25 @@ public class MainActivity extends Activity {
             card.addView(layerInfo);
         }
 
-        if (!Support.dump) {
-            Button copy = Ui.button(c, getString(R.string.grant_dump), Theme.SURFACE_HI, Theme.TEXT);
-            copy.setOnClickListener(v -> {
-                ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                cm.setPrimaryClip(ClipData.newPlainText("pm", "adb shell " + GRANT_CMD));
-                Toast.makeText(this, R.string.copied, Toast.LENGTH_SHORT).show();
-            });
-            Button root = Ui.button(c, getString(R.string.grant_root), Theme.SURFACE_HI, Theme.ACCENT);
-            LinearLayout.LayoutParams lp = Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.topMargin = Ui.dp(c, 6);
-            root.setLayoutParams(lp);
-            root.setOnClickListener(v -> grantWithRoot());
-            card.addView(copy);
-            card.addView(root);
+        // Shizuku
+        int st = ShizukuBridge.state();
+        int stRes = st == ShizukuBridge.STATE_READY ? R.string.shz_on
+                : st == ShizukuBridge.STATE_CONNECTING ? R.string.shz_wait
+                : st == ShizukuBridge.STATE_NEED_PERMISSION ? R.string.shz_need : R.string.shz_off;
+        card.addView(infoRow(c, getString(R.string.shizuku), getString(stRes),
+                st == ShizukuBridge.STATE_READY ? Theme.ACCENT : Theme.WARN));
+
+        if (st == ShizukuBridge.STATE_NEED_PERMISSION) {
+            Button ask = Ui.button(c, getString(R.string.shz_request), Theme.SURFACE_HI, Theme.ACCENT);
+            ask.setOnClickListener(v -> ShizukuBridge.requestPermission());
+            card.addView(ask);
+        } else if (st == ShizukuBridge.STATE_OFF) {
+            Intent launch = getPackageManager().getLaunchIntentForPackage(ShizukuBridge.SHIZUKU_PACKAGE);
+            if (launch != null) {
+                Button open = Ui.button(c, getString(R.string.shz_open), Theme.SURFACE_HI, Theme.ACCENT);
+                open.setOnClickListener(v -> startActivity(launch));
+                card.addView(open);
+            }
         }
         return card;
     }
@@ -258,6 +381,15 @@ public class MainActivity extends Activity {
     }
 
     // ---------------------------------------------------------------- yardımcılar
+
+    private View infoRow(Context c, String label, String value, int valueColor) {
+        LinearLayout row = Ui.row(c);
+        row.setPadding(0, Ui.dp(c, 8), 0, Ui.dp(c, 4));
+        row.addView(Ui.text(c, label, 14, Theme.TEXT),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(Ui.text(c, value, 14, valueColor));
+        return row;
+    }
 
     private View chip(Context c, String label, boolean ok) {
         LinearLayout l = Ui.row(c);
@@ -314,26 +446,6 @@ public class MainActivity extends Activity {
                 msg = getString(R.string.permission_denied);
             }
             final String m = msg;
-            runOnUiThread(() -> Toast.makeText(this, m, Toast.LENGTH_SHORT).show());
-            refreshAsync();
-        }).start();
-    }
-
-    private void grantWithRoot() {
-        new Thread(() -> {
-            boolean ok = false;
-            try {
-                Process p = new ProcessBuilder("su", "-c", GRANT_CMD).redirectErrorStream(true).start();
-                BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
-                while (r.readLine() != null) {
-                    // çıktıyı boşalt
-                }
-                int code = p.waitFor();
-                FpsMeter.detect(getApplicationContext());
-                ok = code == 0 && Support.dump;
-            } catch (Exception ignored) {
-            }
-            final String m = getString(ok ? R.string.granted : R.string.permission_denied);
             runOnUiThread(() -> Toast.makeText(this, m, Toast.LENGTH_SHORT).show());
             refreshAsync();
         }).start();

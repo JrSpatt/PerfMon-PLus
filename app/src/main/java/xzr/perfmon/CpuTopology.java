@@ -8,17 +8,29 @@ import java.util.Map;
 
 /** CPU çekirdek sayısı ve little/mid/big küme dağılımı. */
 final class CpuTopology {
-    static int count = 1;
-    static int[][] clusters = {{0}};
-    static String[] labels = {"CPU"};
+    /** Çekirdek sayısı, kümeler ve etiketler tek nesnede yayımlanır; okuyucu tutarlı bir tarama görür. */
+    static final class Data {
+        final int count;
+        final int[][] clusters;
+        final String[] labels;
+
+        Data(int count, int[][] clusters, String[] labels) {
+            this.count = count;
+            this.clusters = clusters;
+            this.labels = labels;
+        }
+    }
+
+    private static volatile Data data = new Data(1, new int[][]{{0}}, new String[]{"CPU"});
+
+    static Data get() {
+        return data;
+    }
 
     static void probe() {
         int n = countCpus();
         int[][] cl = detectClusters(n);
-        String[] lb = makeLabels(cl.length);
-        clusters = cl;
-        labels = lb;
-        count = n;
+        data = new Data(n, cl, makeLabels(cl.length));
     }
 
     private static int countCpus() {

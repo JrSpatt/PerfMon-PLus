@@ -40,6 +40,7 @@ public class FloatingWindow extends Service {
     public void onCreate() {
         super.onCreate();
         Prefs.init(this);
+        ShizukuBridge.init(this);
         running = true;
         startForeground(1, buildNotification());
         Support.probe(this);
@@ -62,6 +63,7 @@ public class FloatingWindow extends Service {
     private void setup() {
         wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
         view = new OverlayView(this);
+        final boolean locked = Prefs.on(Prefs.LOCK, false);
 
         lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -70,7 +72,8 @@ public class FloatingWindow extends Service {
                         ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                         : WindowManager.LayoutParams.TYPE_SYSTEM_ALERT,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | (locked ? WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE : 0),
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.TOP | Gravity.START;
 
@@ -80,8 +83,9 @@ public class FloatingWindow extends Service {
         lp.x = Math.max(0, Math.min(x, dm.widthPixels - Ui.dp(this, 80)));
         lp.y = Math.max(0, Math.min(y, dm.heightPixels - Ui.dp(this, 80)));
 
-        view.close.setOnClickListener(v -> stopSelf());
-        view.setOnTouchListener(new android.view.View.OnTouchListener() {
+        if (!locked) {
+            view.close.setOnClickListener(v -> stopSelf());
+            view.setOnTouchListener(new android.view.View.OnTouchListener() {
             private float downX, downY;
             private int startX, startY;
 
@@ -109,7 +113,8 @@ public class FloatingWindow extends Service {
                         return false;
                 }
             }
-        });
+            });
+        }
 
         try {
             wm.addView(view, lp);

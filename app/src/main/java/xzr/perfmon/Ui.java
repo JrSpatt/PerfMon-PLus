@@ -58,8 +58,8 @@ final class Ui {
         Switch s = new Switch(c);
         s.setText(label);
         s.setTextColor(Theme.TEXT);
-        s.setTextSize(15);
-        s.setMinHeight(dp(c, 46));
+        s.setTextSize(14);
+        s.setMinHeight(dp(c, 42));
         s.setChecked(Prefs.on(key, def));
         s.setOnCheckedChangeListener((b, on) -> {
             Prefs.sp.edit().putBoolean(key, on).apply();
@@ -104,6 +104,26 @@ final class Ui {
             }
         });
         box.addView(bar);
+        return box;
+    }
+
+    /** Anahtarları cols sütunlu kompakt ızgaraya dizer. */
+    static LinearLayout grid(Context c, java.util.List<? extends View> items, int cols) {
+        LinearLayout box = new LinearLayout(c);
+        box.setOrientation(LinearLayout.VERTICAL);
+        for (int i = 0; i < items.size(); i += cols) {
+            LinearLayout line = new LinearLayout(c);
+            for (int k = 0; k < cols; k++) {
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+                if (k < cols - 1) lp.rightMargin = dp(c, 16);
+                if (i + k < items.size()) {
+                    line.addView(items.get(i + k), lp);
+                } else {
+                    line.addView(new View(c), lp);
+                }
+            }
+            box.addView(line);
+        }
         return box;
     }
 
