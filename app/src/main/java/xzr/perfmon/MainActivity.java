@@ -5,24 +5,20 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.method.LinkMovementMethod;
 import android.text.style.URLSpan;
-import android.util.DisplayMetrics;
-import android.view.Gravity;
-import android.view.MotionEvent;
+import android.content.pm.PackageManager;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
-import android.widget.FrameLayout;
+import android.widget.Switch;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -34,20 +30,23 @@ import java.io.OutputStreamWriter;
 
 public class MainActivity extends Activity {
     private ScrollView scroll;
-    private final Handler handler = new Handler(Looper.getMainLooper());
 
-    // Önizleme ve konum seçici
-    private FrameLayout stage, phone;
-    private View posChip;
-    private OverlayView previewView;
-    private Monitor previewMonitor;
-    private int chipW, chipH;
+    private TextView statePill, sourceValue;
+    private Button startStop;
+    private Switch lockSwitch;
+    private PositionMap map;
+    private boolean editLandscape, resumed, syncingLock;
+    private int probeGeneration;
+    private boolean startingAfterNotification;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Prefs.init(this);
         ShizukuBridge.init(this);
+        android.graphics.Point area = OverlayPosition.area(this);
+        editLandscape = savedInstanceState == null ? area.x > area.y : savedInstanceState.getBoolean("editLandscape");
+        startingAfterNotification = savedInstanceState != null && savedInstanceState.getBoolean("starting");
         scroll = new ScrollView(this);
         scroll.setBackgroundColor(Theme.BG);
         setContentView(scroll);
@@ -56,23 +55,38 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        ShizukuBridge.onChange = this::refreshAsync;
+        resumed = true;
+        FloatingWindow.onChange = this::refreshControls;
+        ShizukuBridge.onChange = () -> runOnUiThread(() -> { if (resumed) build(); });
+        ShizukuBridge.tryBind();
+        refreshControls();
         refreshAsync();
     }
 
-    @Override
-    protected void onPause() {
+    @Override protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        out.putBoolean("editLandscape", editLandscape);
+        out.putBoolean("starting", startingAfterNotification);
+    }
+
+    @Override protected void onPause() {
+        resumed = false;
+        probeGeneration++;
         ShizukuBridge.onChange = null;
-        stopPreview();
+        FloatingWindow.onChange = null;
         super.onPause();
     }
 
-    /** Destek taraması (dumpsys çağırabildiği için) arka planda yapılır, sonra ekran yeniden kurulur. */
     private void refreshAsync() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            runOnUiThread(this::refreshAsync);
+            return;
+        }
+        if (!resumed) return;
+        int generation = ++probeGeneration;
         new Thread(() -> {
             Support.probe(getApplicationContext());
-            FpsMeter.detect(getApplicationContext());
-            runOnUiThread(this::build);
+            runOnUiThread(() -> { if (resumed && generation == probeGeneration) build(); });
         }, "perfmon-probe").start();
     }
 
@@ -80,7 +94,6 @@ public class MainActivity extends Activity {
         if (isFinishing() || isDestroyed()) return;
         final Context c = this;
         final int pad = Ui.dp(c, 16);
-        stopPreview();
 
         LinearLayout root = new LinearLayout(c);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -88,10 +101,10 @@ public class MainActivity extends Activity {
 
         root.addView(header(c));
         root.addView(startButton(c));
-        root.addView(previewCard(c));
-        root.addView(monitorCard(c));
-        root.addView(windowCard(c));
-        root.addView(advancedCard(c));
+        root.addView(positionCard(c));
+        root.addView(Ui.collapsible(c, (LinearLayout) monitorCard(c), "expand_monitor", true));
+        root.addView(Ui.collapsible(c, (LinearLayout) windowCard(c), "expand_window", false));
+        root.addView(Ui.collapsible(c, (LinearLayout) advancedCard(c), "expand_advanced", false));
         root.addView(compatCard(c));
         root.addView(aboutCard(c));
 
@@ -99,14 +112,39 @@ public class MainActivity extends Activity {
         scroll.removeAllViews();
         scroll.addView(root);
         scroll.post(() -> scroll.scrollTo(0, y));
-        startPreview();
+        refreshControls();
     }
 
-    /** Ayar değişince çalışan monitörü yeniler ve önizlemeyi tazeler. */
-    private void onSettingChanged() {
-        FloatingWindow.reload(this);
-        startPreview();
+    private void refreshControls() {
+        if (startStop == null) return;
+        boolean on = FloatingWindow.running;
+        statePill.setText(on ? R.string.state_on : R.string.state_off);
+        statePill.setTextColor(on ? Theme.BG : Theme.MUTED);
+        statePill.setBackground(Ui.round(this, on ? Theme.ACCENT : Theme.SURFACE_HI, 20));
+        startStop.setText(on ? R.string.stop : R.string.start);
+        startStop.setTextColor(on ? Theme.TEXT : Theme.BG);
+        startStop.setBackground(Ui.round(this, on ? Theme.SURFACE_HI : Theme.ACCENT, 12));
+        if (lockSwitch != null) {
+            syncingLock = true;
+            lockSwitch.setChecked(Prefs.on(Prefs.LOCK, false));
+            syncingLock = false;
+        }
+        if (map != null) map.refresh();
+        if (sourceValue != null) {
+            int source = FloatingWindow.source();
+            int label;
+            switch (source) {
+                case FpsMeter.MODE_SHIZUKU: label = R.string.fps_src_shizuku; break;
+                case FpsMeter.MODE_DUMP: label = R.string.fps_src_app; break;
+                case FpsMeter.MODE_PANEL: label = R.string.fps_src_panel; break;
+                case FpsMeter.MODE_HZ: label = R.string.fps_src_hz; break;
+                default: label = R.string.idle_source;
+            }
+            sourceValue.setText(label);
+        }
     }
+
+    private void onSettingChanged() { FloatingWindow.reload(this); }
 
     // ------------------------------------------------------------------ bölümler
 
@@ -122,6 +160,7 @@ public class MainActivity extends Activity {
         pill.setPadding(Ui.dp(c, 12), Ui.dp(c, 5), Ui.dp(c, 12), Ui.dp(c, 5));
         pill.setBackground(Ui.round(c, on ? Theme.ACCENT : Theme.SURFACE_HI, 20));
         row.addView(pill);
+        statePill = pill;
 
         LinearLayout.LayoutParams lp = Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.bottomMargin = Ui.dp(c, 14);
@@ -137,99 +176,42 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams lp = Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(c, 54));
         lp.bottomMargin = Ui.dp(c, 14);
         b.setLayoutParams(lp);
+        startStop = b;
         b.setOnClickListener(v -> toggleMonitor());
         return b;
     }
 
-    /** Canlı önizleme (gerçek veriyle, gerçek boyutta) ve sürüklenebilir konum haritası. */
-    private View previewCard(Context c) {
-        LinearLayout card = Ui.card(c, getString(R.string.sec_preview));
-
-        stage = new FrameLayout(c);
-        stage.setBackground(Ui.round(c, 0xFF0B0D10, 12));
-        int sp = Ui.dp(c, 10);
-        stage.setPadding(sp, sp, sp, sp);
-        card.addView(stage, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        DisplayMetrics dm = getResources().getDisplayMetrics();
-        final int pw = Ui.dp(c, 110);
-        final int ph = Math.round(pw * (float) dm.heightPixels / dm.widthPixels);
-        final float ratio = pw / (float) dm.widthPixels;
-
-        phone = new FrameLayout(c);
-        GradientDrawable frame = Ui.round(c, Theme.BG, 14);
-        frame.setStroke(Ui.dp(c, 2), Theme.SURFACE_HI);
-        phone.setBackground(frame);
-        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(pw, ph);
-        plp.gravity = Gravity.CENTER_HORIZONTAL;
-        plp.topMargin = Ui.dp(c, 14);
-        card.addView(phone, plp);
-
-        posChip = new View(c);
-        posChip.setBackground(Ui.round(c, 0xCC4CD08A, 3));
-        phone.addView(posChip, new FrameLayout.LayoutParams(Ui.dp(c, 30), Ui.dp(c, 20)));
-
-        phone.setOnTouchListener((v, e) -> {
-            int a = e.getActionMasked();
-            if (a == MotionEvent.ACTION_DOWN) v.getParent().requestDisallowInterceptTouchEvent(true);
-            if (a != MotionEvent.ACTION_DOWN && a != MotionEvent.ACTION_MOVE && a != MotionEvent.ACTION_UP)
-                return false;
-            float cx = Math.max(0, Math.min(e.getX() - chipW / 2f, pw - chipW));
-            float cy = Math.max(0, Math.min(e.getY() - chipH / 2f, ph - chipH));
-            posChip.setX(cx);
-            posChip.setY(cy);
-            if (a == MotionEvent.ACTION_UP) {
-                Prefs.sp.edit().putInt(Prefs.POS_X, Math.round(cx / ratio))
-                        .putInt(Prefs.POS_Y, Math.round(cy / ratio)).apply();
-                FloatingWindow.reload(this);
-            }
-            return true;
+    private View positionCard(Context c) {
+        LinearLayout card = Ui.card(c, getString(R.string.position));
+        LinearLayout picker = Ui.row(c);
+        Button portrait = Ui.button(c, getString(R.string.portrait), Theme.SURFACE_HI, Theme.TEXT);
+        Button landscape = Ui.button(c, getString(R.string.landscape), Theme.SURFACE_HI, Theme.TEXT);
+        LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, Ui.dp(c, 40), 1);
+        left.rightMargin = Ui.dp(c, 6);
+        picker.addView(portrait, left);
+        picker.addView(landscape, new LinearLayout.LayoutParams(0, Ui.dp(c, 40), 1));
+        card.addView(picker);
+        map = new PositionMap(c, editLandscape);
+        card.addView(map, new LinearLayout.LayoutParams(-1, Ui.dp(c, 145)));
+        Runnable select = () -> {
+            modeStyle(portrait, !editLandscape);
+            modeStyle(landscape, editLandscape);
+            map.select(editLandscape);
+        };
+        portrait.setOnClickListener(v -> { editLandscape = false; select.run(); });
+        landscape.setOnClickListener(v -> { editLandscape = true; select.run(); });
+        select.run();
+        lockSwitch = Ui.toggle(c, getString(R.string.lock_pos), Prefs.LOCK, false, () -> {
+            if (!syncingLock) FloatingWindow.lockChanged();
         });
-
-        TextView hint = Ui.text(c, getString(R.string.drag_hint), 12, Theme.MUTED);
-        hint.setGravity(Gravity.CENTER_HORIZONTAL);
-        hint.setPadding(0, Ui.dp(c, 8), 0, Ui.dp(c, 4));
-        card.addView(hint);
+        card.addView(lockSwitch);
         return card;
     }
 
-    private void startPreview() {
-        if (stage == null || isFinishing() || isDestroyed()) return;
-        stopPreview();
-        stage.removeAllViews();
-        previewView = new OverlayView(this);
-        stage.addView(previewView, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        final OverlayView pv = previewView;
-        previewMonitor = new Monitor(this, s -> pv.update(s));
-        previewMonitor.start();
-        placeChip();
-    }
-
-    private void stopPreview() {
-        if (previewMonitor != null) {
-            previewMonitor.stop();
-            previewMonitor = null;
-        }
-    }
-
-    /** Konum kutusunun boyutunu önizlemeye, yerini kayıtlı konuma göre ayarlar. */
-    private void placeChip() {
-        if (previewView == null || phone == null || posChip == null) return;
-        DisplayMetrics dm = getResources().getDisplayMetrics();
-        previewView.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
-        final int pw = Ui.dp(this, 110);
-        final int ph = Math.round(pw * (float) dm.heightPixels / dm.widthPixels);
-        final float ratio = pw / (float) dm.widthPixels;
-        chipW = Math.min(pw, Math.max(Ui.dp(this, 14), Math.round(previewView.getMeasuredWidth() * ratio)));
-        chipH = Math.min(ph, Math.max(Ui.dp(this, 10), Math.round(previewView.getMeasuredHeight() * ratio)));
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(chipW, chipH);
-        posChip.setLayoutParams(lp);
-        int x = Prefs.sp.getInt(Prefs.POS_X, Ui.dp(this, 16));
-        int y = Prefs.sp.getInt(Prefs.POS_Y, Ui.dp(this, 80));
-        posChip.setX(Math.max(0, Math.min(x * ratio, pw - chipW)));
-        posChip.setY(Math.max(0, Math.min(y * ratio, ph - chipH)));
+    private void modeStyle(Button button, boolean selected) {
+        button.setSelected(selected);
+        button.setTextColor(selected ? Theme.BG : Theme.TEXT);
+        button.setBackground(Ui.round(this, selected ? Theme.ACCENT : Theme.SURFACE_HI, 10));
     }
 
     private View monitorCard(Context c) {
@@ -260,12 +242,11 @@ public class MainActivity extends Activity {
         LinearLayout card = Ui.card(c, getString(R.string.sec_window));
         Runnable r = this::onSettingChanged;
         card.addView(Ui.slider(c, getString(R.string.refresh_interval), Prefs.DELAY,
-                250, 3000, 250, Prefs.DELAY_DEF, "ms", r));
+                250, 3000, 250, Prefs.DELAY_DEF, "ms", null, r));
         card.addView(Ui.slider(c, getString(R.string.ui_scale), Prefs.SCALE,
-                70, 150, 5, Prefs.SCALE_DEF, "%", r));
+                70, 150, 5, Prefs.SCALE_DEF, "%", value -> FloatingWindow.appearance(Prefs.SCALE, value), null));
         card.addView(Ui.slider(c, getString(R.string.opacity), Prefs.ALPHA,
-                20, 100, 5, Prefs.ALPHA_DEF, "%", r));
-        card.addView(Ui.toggle(c, getString(R.string.lock_pos), Prefs.LOCK, false, r));
+                20, 100, 5, Prefs.ALPHA_DEF, "%", value -> FloatingWindow.appearance(Prefs.ALPHA, value), null));
         if (Support.power)
             card.addView(Ui.toggle(c, getString(R.string.reverse_current), Prefs.REVERSE_CURRENT, false, r));
         return card;
@@ -320,19 +301,13 @@ public class MainActivity extends Activity {
             card.addView(line);
         }
 
-        // FPS kaynağı
-        int srcRes = Support.fpsMode == FpsMeter.MODE_APP
-                ? (Support.shizuku ? R.string.fps_src_shizuku : R.string.fps_src_app)
-                : Support.fpsMode == FpsMeter.MODE_PANEL ? R.string.fps_src_panel : R.string.fps_src_hz;
-        card.addView(infoRow(c, getString(R.string.fps_src), getString(srcRes),
-                Support.fpsMode == FpsMeter.MODE_APP ? Theme.ACCENT : Theme.WARN));
-
-        if (Support.fpsMode == FpsMeter.MODE_APP) {
-            String dl = FpsMeter.debugLayer;
-            TextView layerInfo = Ui.text(c, dl == null ? "—" : dl, 11, Theme.MUTED);
-            layerInfo.setPadding(0, 0, 0, Ui.dp(c, 4));
-            card.addView(layerInfo);
-        }
+        LinearLayout sourceRow = Ui.row(c);
+        sourceRow.setPadding(0, Ui.dp(c, 8), 0, Ui.dp(c, 4));
+        sourceRow.addView(Ui.text(c, getString(R.string.fps_src), 14, Theme.TEXT),
+                new LinearLayout.LayoutParams(0, -2, 1));
+        sourceValue = Ui.text(c, getString(R.string.idle_source), 14, Theme.ACCENT);
+        sourceRow.addView(sourceValue);
+        card.addView(sourceRow);
 
         // Shizuku
         int st = ShizukuBridge.state();
@@ -366,8 +341,8 @@ public class MainActivity extends Activity {
         card.addView(lic);
 
         card.addView(link(c, getString(R.string.about_github), "https://github.com/libxzr/PerfMon-Plus", ""));
-        card.addView(link(c, getString(R.string.about_translator),
-                "https://www.coolapk.com/apk/xzr.perfmon", getString(R.string.about_translated)));
+        card.addView(link(c, getString(R.string.developer_handle),
+                "https://t.me/al1deburdanyak", getString(R.string.about_developer)));
 
         String ver = "";
         try {
@@ -418,13 +393,29 @@ public class MainActivity extends Activity {
             Toast.makeText(this, R.string.overlay_needed, Toast.LENGTH_SHORT).show();
             startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:" + getPackageName())));
+        } else if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED && !Prefs.on("notification_asked", false)) {
+            startingAfterNotification = true;
+            Prefs.sp.edit().putBoolean("notification_asked", true).apply();
+            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 11);
         } else {
-            Intent i = new Intent(this, FloatingWindow.class);
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
-            else startService(i);
-            handler.postDelayed(() -> moveTaskToBack(true), 250);
+            startMonitor();
         }
-        handler.postDelayed(this::build, 400);
+    }
+
+    @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(request, permissions, results);
+        if (request == 11 && startingAfterNotification) {
+            startingAfterNotification = false;
+            if (Settings.canDrawOverlays(this) && !FloatingWindow.running) startMonitor();
+        }
+    }
+
+    private void startMonitor() {
+        Intent intent = new Intent(this, FloatingWindow.class);
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent);
+        else startService(intent);
+        moveTaskToBack(true);
     }
 
     private void setEnforce(int mode) {

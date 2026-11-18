@@ -13,133 +13,244 @@ import android.graphics.drawable.Icon;
 import android.os.Build;
 import android.os.IBinder;
 import android.service.quicksettings.TileService;
-import android.util.DisplayMetrics;
+import android.content.res.Configuration;
+import android.graphics.Point;
+import android.graphics.PointF;
+import android.hardware.input.InputManager;
+import android.hardware.display.DisplayManager;
+import android.view.Display;
+import android.view.WindowInsets;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.View;
 import android.view.WindowManager;
 
 /** Kayan monitör penceresini ve onu canlı tutan ön plan bildirimini yönetir. */
 public class FloatingWindow extends Service {
-    static final String ACTION_STOP = "xzr.perfmon.STOP";
-    static final String ACTION_RELOAD = "xzr.perfmon.RELOAD";
+    static final String ACTION_STOP = "com.spatt.perfmon.STOP";
     private static final String CHANNEL = "perfmon";
-
     static volatile boolean running;
-
+    // Activity and service receive state changes on the Android main thread.
+    static Runnable onChange;
+    private static FloatingWindow active;
+    private Context overlayContext;
     private WindowManager wm;
-    private OverlayView view;
     private WindowManager.LayoutParams lp;
+    private OverlayView view;
     private Monitor monitor;
+    private Point area;
+    private boolean landscape, dragging;
+    private int source = FpsMeter.MODE_NONE;
+    private float windowOpacity = 1;
 
-    /** Çalışıyorsa ayarların yeniden okunmasını ister. */
-    static void reload(Context c) {
-        if (running) c.startService(new Intent(c, FloatingWindow.class).setAction(ACTION_RELOAD));
+    static int source() { return active == null ? FpsMeter.MODE_NONE : active.source; }
+
+    static int markerWidth(Context c) {
+        return active == null || active.view == null || active.view.getWidth() == 0 ? Ui.dp(c, 82) : active.view.getWidth();
     }
 
-    @Override
-    public void onCreate() {
+    static int markerHeight(Context c) {
+        return active == null || active.view == null || active.view.getHeight() == 0 ? Ui.dp(c, 56) : active.view.getHeight();
+    }
+
+    static void reload(Context c) {
+        if (active != null) active.rebuildMetrics();
+    }
+
+    static void appearance(String key, int value) {
+        if (active == null) return;
+        if (Prefs.SCALE.equals(key)) active.view.setScalePercent(value);
+        else if (Prefs.ALPHA.equals(key)) active.setOpacity(value);
+    }
+
+    static void lockChanged() {
+        if (active == null) return;
+        active.dragging = false;
+        active.applyLock();
+        active.wm.updateViewLayout(active.view, active.lp);
+        active.position();
+        notifyState();
+    }
+
+    static void positionChanged(boolean horizontal) {
+        if (active != null && active.landscape == horizontal) active.position();
+    }
+
+    private static void notifyState() {
+        if (onChange != null) onChange.run();
+    }
+
+    @Override public void onCreate() {
         super.onCreate();
         Prefs.init(this);
         ShizukuBridge.init(this);
-        running = true;
         startForeground(1, buildNotification());
-        Support.probe(this);
-        setup();
-        requestTileUpdate();
+        overlayContext = this;
+        if (Build.VERSION.SDK_INT >= 30) {
+            Display display = getSystemService(DisplayManager.class).getDisplay(Display.DEFAULT_DISPLAY);
+            if (display != null) {
+                overlayContext = createDisplayContext(display)
+                        .createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null);
+            }
+        }
+        wm = (WindowManager) overlayContext.getSystemService(WINDOW_SERVICE);
     }
 
-    @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
-        String a = intent == null ? null : intent.getAction();
-        if (ACTION_STOP.equals(a)) {
+    @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
             stopSelf();
-        } else if (ACTION_RELOAD.equals(a)) {
-            teardown();
-            setup();
+        } else if (view == null) {
+            Support.probe(this);
+            rebuildMetrics();
         }
         return START_NOT_STICKY;
     }
 
-    private void setup() {
-        wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
-        view = new OverlayView(this);
-        final boolean locked = Prefs.on(Prefs.LOCK, false);
-
-        lp = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                Build.VERSION.SDK_INT >= 26
-                        ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                        : WindowManager.LayoutParams.TYPE_SYSTEM_ALERT,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                        | (locked ? WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE : 0),
+    private void rebuildMetrics() {
+        teardown();
+        area = OverlayPosition.area(overlayContext);
+        landscape = area.x > area.y;
+        view = new OverlayView(overlayContext);
+        lp = new WindowManager.LayoutParams(-2, -2, Build.VERSION.SDK_INT >= 26
+                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_SYSTEM_ALERT,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT);
-        lp.gravity = Gravity.TOP | Gravity.START;
-
-        DisplayMetrics dm = getResources().getDisplayMetrics();
-        int x = Prefs.sp.getInt(Prefs.POS_X, Ui.dp(this, 16));
-        int y = Prefs.sp.getInt(Prefs.POS_Y, Ui.dp(this, 80));
-        lp.x = Math.max(0, Math.min(x, dm.widthPixels - Ui.dp(this, 80)));
-        lp.y = Math.max(0, Math.min(y, dm.heightPixels - Ui.dp(this, 80)));
-
-        if (!locked) {
-            view.close.setOnClickListener(v -> stopSelf());
-            view.setOnTouchListener(new android.view.View.OnTouchListener() {
-            private float downX, downY;
-            private int startX, startY;
-
-            @Override
-            public boolean onTouch(android.view.View v, MotionEvent e) {
+        lp.gravity = Gravity.TOP | Gravity.LEFT;
+        if (Build.VERSION.SDK_INT >= 30) {
+            lp.setFitInsetsTypes(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            lp.setFitInsetsIgnoringVisibility(true);
+        }
+        applyLock();
+        view.close.setOnClickListener(v -> stopSelf());
+        view.pin.setOnClickListener(v -> {
+            savePosition();
+            Prefs.sp.edit().putBoolean(Prefs.LOCK, true).apply();
+            lockChanged();
+        });
+        view.setOnTouchListener(new View.OnTouchListener() {
+            float downX, downY;
+            int startX, startY;
+            @Override public boolean onTouch(View v, MotionEvent e) {
                 switch (e.getActionMasked()) {
                     case MotionEvent.ACTION_DOWN:
+                        dragging = true;
                         downX = e.getRawX();
                         downY = e.getRawY();
                         startX = lp.x;
                         startY = lp.y;
                         return true;
                     case MotionEvent.ACTION_MOVE:
-                        lp.x = startX + (int) (e.getRawX() - downX);
-                        lp.y = startY + (int) (e.getRawY() - downY);
-                        try {
-                            wm.updateViewLayout(view, lp);
-                        } catch (Exception ignored) {
-                        }
+                        if (!dragging) return false;
+                        move(Math.round(startX + e.getRawX() - downX), Math.round(startY + e.getRawY() - downY));
                         return true;
                     case MotionEvent.ACTION_UP:
-                        Prefs.sp.edit().putInt(Prefs.POS_X, lp.x).putInt(Prefs.POS_Y, lp.y).apply();
+                        if (dragging) savePosition();
+                        dragging = false;
+                        notifyState();
                         return true;
-                    default:
-                        return false;
+                    case MotionEvent.ACTION_CANCEL:
+                        dragging = false;
+                        position();
+                        return true;
+                    default: return false;
                 }
             }
-            });
-        }
-
+        });
+        view.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (v == view && !dragging && (r - l != or - ol || b - t != ob - ot)) {
+                v.post(() -> { if (v == view && !dragging) position(); });
+            }
+        });
+        view.measure(View.MeasureSpec.makeMeasureSpec(area.x, View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(area.y, View.MeasureSpec.AT_MOST));
+        PointF pos = OverlayPosition.activate(landscape);
+        lp.x = Math.round(pos.x * travelX());
+        lp.y = Math.round(pos.y * travelY());
         try {
             wm.addView(view, lp);
-        } catch (Exception e) { // üstte gösterme izni yoksa
+        } catch (RuntimeException e) {
+            view = null;
             stopSelf();
             return;
         }
-
-        final OverlayView v = view;
-        monitor = new Monitor(this, s -> v.update(s));
+        active = this;
+        running = true;
+        source = FpsMeter.MODE_NONE;
+        monitor = new Monitor(this, s -> {
+            view.update(s);
+            if (source != s.fpsMode) {
+                source = s.fpsMode;
+                notifyState();
+            }
+        });
         monitor.start();
+        notifyState();
+        requestTileUpdate();
+    }
+
+    private void applyLock() {
+        boolean locked = Prefs.on(Prefs.LOCK, false);
+        view.setLocked(locked);
+        windowOpacity = 1;
+        if (locked) {
+            lp.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+            if (Build.VERSION.SDK_INT >= 31) {
+                InputManager im = getSystemService(InputManager.class);
+                windowOpacity = im.getMaximumObscuringOpacityForTouch();
+            }
+        } else {
+            lp.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        }
+        lp.alpha = windowOpacity;
+        setOpacity(Prefs.num(Prefs.ALPHA, Prefs.ALPHA_DEF));
+    }
+
+    private void setOpacity(int percent) {
+        view.setBackgroundOpacity(Math.min(1f, percent / (100f * Math.max(.01f, windowOpacity))));
+    }
+
+    private int travelX() { return Math.max(0, area.x - view.getMeasuredWidth()); }
+    private int travelY() { return Math.max(0, area.y - view.getMeasuredHeight()); }
+
+    private void savePosition() {
+        OverlayPosition.save(landscape, lp.x / (float) Math.max(1, travelX()),
+                lp.y / (float) Math.max(1, travelY()));
+    }
+
+    private void position() {
+        if (view == null || !view.isAttachedToWindow()) return;
+        PointF p = OverlayPosition.read(landscape);
+        move(Math.round(p.x * travelX()), Math.round(p.y * travelY()));
+    }
+
+    private void move(int x, int y) {
+        x = Math.max(0, Math.min(x, travelX()));
+        y = Math.max(0, Math.min(y, travelY()));
+        if (lp.x == x && lp.y == y) return;
+        lp.x = x;
+        lp.y = y;
+        wm.updateViewLayout(view, lp);
+    }
+
+    @Override public void onConfigurationChanged(Configuration config) {
+        super.onConfigurationChanged(config);
+        if (view == null) return;
+        dragging = false;
+        area = OverlayPosition.area(overlayContext);
+        landscape = area.x > area.y;
+        OverlayPosition.activate(landscape);
+        position();
+        view.post(this::position);
     }
 
     private void teardown() {
+        dragging = false;
         if (monitor != null) {
             monitor.stop();
             monitor = null;
         }
-        if (view != null) {
-            try {
-                wm.removeView(view);
-            } catch (Exception ignored) {
-            }
-            view = null;
-        }
+        if (view != null && view.isAttachedToWindow()) wm.removeViewImmediate(view);
+        view = null;
     }
 
     private Notification buildNotification() {
@@ -178,7 +289,9 @@ public class FloatingWindow extends Service {
     @Override
     public void onDestroy() {
         running = false;
+        active = null;
         teardown();
+        notifyState();
         stopForeground(true);
         requestTileUpdate();
         super.onDestroy();

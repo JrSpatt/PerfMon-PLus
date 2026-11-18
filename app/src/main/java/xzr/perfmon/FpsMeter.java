@@ -18,16 +18,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * FPS kaynakları, her turda sırayla denenir:
- * 1) APP: DUMP izniyle dumpsys SurfaceFlinger --latency (öndeki uygulamanın gerçek FPS'i)
- * 2) PANEL: sysfs measured_fps (ekran hattı FPS'i)
- * 3) HZ: yalnızca yukarıdakilerin hiçbiri mümkün değilse ekranın yenileme hızı
- * Geçersiz / doğrulanamayan ölçüm 0 değil -1 döner ve ekranda "--" görünür.
- */
+/** Kare ölçümünü ve her örneğin kaynağını birlikte belirler. */
 final class FpsMeter {
-    static final int MODE_APP = 1, MODE_PANEL = 2, MODE_HZ = 3;
-
+    static final int MODE_NONE = 0, MODE_SHIZUKU = 1, MODE_DUMP = 2, MODE_PANEL = 3, MODE_HZ = 4;
     private static final String[] PANEL_PATHS = {
             "/sys/devices/virtual/graphics/fb0/measured_fps",
             "/sys/class/drm/sde-crtc-0/measured_fps"
@@ -38,7 +31,7 @@ final class FpsMeter {
 
     private static final Pattern ACTIVITY = Pattern.compile("ACTIVITY\\s+([A-Za-z0-9_.]+)/");
     private static final Pattern COMPONENT = Pattern.compile("\\s([A-Za-z][A-Za-z0-9_.]+)/");
-    private static final Pattern NUM = Pattern.compile("\\d+(?:\\.\\d+)?");
+    private static final Pattern NUM = Pattern.compile("[-+]?\\d+(?:\\.\\d+)?");
 
     private static final ScheduledExecutorService KILLER =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -47,81 +40,34 @@ final class FpsMeter {
                 return t;
             });
 
-    /** Tanı için: son seçilen katman ve paket. */
-    static volatile String debugLayer, debugPkg;
-
     private final Context ctx;
-    /** Son okumada hangi kaynağın değer verdiği (etiket için). */
-    volatile int lastMode = MODE_HZ;
-
-    private String layer;
-    private long resolvedAt;
-    private boolean cmdFail;
-    private int fails;
-    private boolean appDisabled;
-    private int zeros;
-    private int seenGeneration = -1;
+    private final LayerSource shizuku = new LayerSource(), direct = new LayerSource();
+    int lastMode = MODE_NONE;
+    private IShellService previousService;
 
     FpsMeter(Context ctx) {
         this.ctx = ctx.getApplicationContext();
     }
 
-    /** İzni ve en iyi kullanılabilir kaynağı belirler (kartta gösterilir). Arka planda çağır. */
-    static void detect(Context ctx) {
-        Support.dump = ctx.checkSelfPermission(PERM_DUMP) == PackageManager.PERMISSION_GRANTED;
-        Support.shizuku = ShizukuBridge.service != null;
-        if (shellAvailable() && layersAvailable()) {
-            Support.fpsMode = MODE_APP;
-        } else if (panelValue() >= 0) {
-            Support.fpsMode = MODE_PANEL;
-        } else {
-            Support.fpsMode = MODE_HZ;
-        }
-    }
-
-    private static boolean layersAvailable() {
-        List<String> l = run(0, 2500, "dumpsys", "SurfaceFlinger", "--list");
-        if (l.isEmpty() || l.get(0).startsWith("Permission Denial")) return false;
-        for (String s : l)
-            if (s.contains("#")) return true;
-        return false;
-    }
-
-    /** dumpsys çalıştırabilecek bir yol var mı: Shizuku servisi veya doğrudan DUMP izni. */
-    private static boolean shellAvailable() {
-        return ShizukuBridge.service != null || Support.dump;
-    }
-
     float read() {
-        int gen = ShizukuBridge.generation;
-        if (gen != seenGeneration) { // Shizuku (yeniden) bağlandı: eski hata durumunu sıfırla
-            seenGeneration = gen;
-            appDisabled = false;
-            fails = 0;
-            layer = null;
+        IShellService service = ShizukuBridge.service;
+        if (service != previousService) {
+            shizuku.reset();
+            previousService = service;
         }
-        Support.shizuku = ShizukuBridge.service != null;
-        boolean appPossible = shellAvailable() && !appDisabled;
-        if (appPossible) {
-            float f = readApp();
-            if (f >= 0) {
-                lastMode = MODE_APP;
-                fails = 0;
-                return f;
-            }
-            if (cmdFail && ++fails >= 3) appDisabled = true;
+        if (service != null) {
+            float f = shizuku.read(service);
+            if (f >= 0) { lastMode = MODE_SHIZUKU; return f; }
         }
-        float p = panelValue();
-        if (p >= 0) {
-            lastMode = MODE_PANEL;
-            return p;
+        if (ctx.checkSelfPermission(PERM_DUMP) == PackageManager.PERMISSION_GRANTED) {
+            float f = direct.read(null);
+            if (f >= 0) { lastMode = MODE_DUMP; return f; }
         }
-        if (!appPossible) {
-            lastMode = MODE_HZ;
-            return displayHz();
-        }
-        lastMode = MODE_APP;
-        return -1;
+        float f = panelValue();
+        if (f >= 0) { lastMode = MODE_PANEL; return f; }
+        f = displayHz();
+        lastMode = f >= 0 ? MODE_HZ : MODE_NONE;
+        return f;
     }
 
     private float displayHz() {
@@ -135,77 +81,100 @@ final class FpsMeter {
             String s = Sysfs.readString(p);
             if (s == null) continue;
             Matcher m = NUM.matcher(s);
-            if (m.find()) return Float.parseFloat(m.group());
+            if (m.find()) {
+                float measured = Float.parseFloat(m.group());
+                if (measured >= 0 && !Float.isInfinite(measured)) return measured;
+            }
         }
         return -1;
     }
 
-    // ---------------------------------------------------------------- APP modu
+    private static final class LayerSource {
+        String layer, pkg;
+        long nextPackageCheck, nextSearch;
+        int zeros;
 
-    private float readApp() {
-        long now = SystemClock.elapsedRealtime();
-        if (layer == null || now - resolvedAt > RESOLVE_EVERY_MS) resolve(now);
-        if (cmdFail || layer == null) return -1;
-        float f = measure(layer);
-        // Üst üste sıfır: uygulama değişmiş olabilir, katmanı hemen yeniden bul
-        if (f == 0) {
-            if (++zeros >= 2) {
-                zeros = 0;
-                resolvedAt = 0;
-            }
-        } else {
+        void reset() {
+            layer = null;
+            pkg = null;
+            nextPackageCheck = nextSearch = 0;
             zeros = 0;
         }
-        return f;
-    }
 
-    /** Yalnızca öndeki uygulamanın katmanları aranır; paket veya katman doğrulanamazsa ölçüm yok. */
-    private void resolve(long now) {
-        resolvedAt = now;
-        layer = null;
-        debugLayer = null;
-        List<String> all = run(0, 2500, "dumpsys", "SurfaceFlinger", "--list");
-        if (all.isEmpty() || all.get(0).startsWith("Permission Denial")) {
-            cmdFail = true;
-            return;
-        }
-        cmdFail = false;
-
-        String pkg = topPackage();
-        debugPkg = pkg;
-        if (pkg == null) return;
-
-        // "com.game" yalnızca "com.game/..." ile eşleşir, "com.game.beta/..." ile değil
-        Pattern own = Pattern.compile("(?:^|[^A-Za-z0-9_.])" + Pattern.quote(pkg) + "/");
-        String best = null;
-        float bestFps = -1;
-        int tested = 0;
-        for (String l : all) {
-            l = l.trim();
-            if (!own.matcher(l).find()) continue;
-            if (++tested > 8) break;
-            float f = measure(l);
-            if (f > bestFps) {
-                bestFps = f;
-                best = l;
+        float read(IShellService service) {
+            long now = SystemClock.elapsedRealtime();
+            if (now >= nextPackageCheck) {
+                String current = topPackage(service);
+                if (!java.util.Objects.equals(current, pkg)) {
+                    pkg = current;
+                    layer = null;
+                    nextSearch = 0;
+                    zeros = 0;
+                }
+                nextPackageCheck = now + 1000;
             }
+            if (pkg == null) return -1;
+            if (layer == null || now >= nextSearch) {
+                if (now < nextSearch) return -1;
+                nextSearch = now + RESOLVE_EVERY_MS;
+                return resolve(service);
+            }
+            float f = measure(service, layer);
+            if (f < 0 || (f == 0 && ++zeros >= 2)) {
+                layer = null;
+                nextSearch = 0;
+                nextPackageCheck = 0;
+                zeros = 0;
+            } else if (f > 0) {
+                zeros = 0;
+            }
+            return f;
         }
-        layer = best; // hiçbirinden geçerli ölçüm gelmediyse null kalır
-        debugLayer = best;
-    }
 
-    /** Öndeki uygulamanın paketi: önce activity top, olmazsa resumed activity satırı. */
-    private String topPackage() {
-        for (String l : run(200, 2500, "dumpsys", "activity", "top")) {
-            Matcher m = ACTIVITY.matcher(l);
-            if (m.find()) return m.group(1);
+        private float resolve(IShellService service) {
+            Pattern own = Pattern.compile("(?:^|[^A-Za-z0-9_.])" + Pattern.quote(pkg) + "/");
+            List<String> candidates = new ArrayList<>();
+            for (String name : run(service, 0, 2500, "dumpsys", "SurfaceFlinger", "--list")) {
+                name = name.trim();
+                if (own.matcher(name).find() && !name.startsWith("Background for") && !name.startsWith("Bounds for"))
+                    candidates.add(name);
+            }
+            // Oyun yüzeyi konteyner ve dekor katmanlarından önce incelenir.
+            Collections.sort(candidates, (a, b) -> Boolean.compare(b.contains("SurfaceView"), a.contains("SurfaceView")));
+            layer = null;
+            float best = -1;
+            for (int i = 0; i < Math.min(8, candidates.size()); i++) {
+                String candidate = candidates.get(i);
+                float f = measure(service, candidate);
+                if (f > best) { best = f; layer = candidate; }
+                if (f > 0 && candidate.contains("SurfaceView")) break;
+            }
+            return best;
         }
-        for (String l : run(600, 3000, "dumpsys", "activity", "activities")) {
-            if (!l.contains("ResumedActivity")) continue;
-            Matcher m = COMPONENT.matcher(l);
-            if (m.find()) return m.group(1);
+
+        private String topPackage(IShellService service) {
+            String fallback = null, resumed = null;
+            for (String l : run(service, 1000, 2500, "dumpsys", "activity", "activities")) {
+                if (!l.contains("ResumedActivity")) continue;
+                Matcher m = COMPONENT.matcher(l);
+                if (m.find()) {
+                    if (l.contains("topResumedActivity")) return m.group(1);
+                    if (l.contains("mResumedActivity")) resumed = m.group(1);
+                    else fallback = m.group(1);
+                }
+            }
+            if (resumed != null) return resumed;
+            if (fallback != null) return fallback;
+            String only = null;
+            for (String l : run(service, 300, 2500, "dumpsys", "activity", "top")) {
+                Matcher m = ACTIVITY.matcher(l);
+                if (!m.find()) continue;
+                String found = m.group(1);
+                if (only != null && !only.equals(found)) return null;
+                only = found;
+            }
+            return only;
         }
-        return null;
     }
 
     /**
@@ -214,8 +183,8 @@ final class FpsMeter {
      * bu yüzden (kare sayısı - 1) / (ilk ile son kare arası süre) kullanılır.
      * Geçersiz yanıtta -1, ekran durağansa 0 döner.
      */
-    private float measure(String layerName) {
-        List<String> lines = run(0, 2500, "dumpsys", "SurfaceFlinger", "--latency", layerName);
+    private static float measure(IShellService service, String layerName) {
+        List<String> lines = run(service, 0, 2500, "dumpsys", "SurfaceFlinger", "--latency", layerName);
         if (lines.size() < 2 || lines.get(0).startsWith("Permission Denial")) return -1;
 
         long now = System.nanoTime();
@@ -250,21 +219,15 @@ final class FpsMeter {
 
     // ------------------------------------------------------------ süreç yardımcı
 
-    /** Önce Shizuku (shell yetkisi), yoksa doğrudan DUMP izniyle yerel çalıştırma; ikisi de yoksa boş liste. */
-    private static List<String> run(int maxLines, int timeoutMs, String... cmd) {
-        IShellService s = ShizukuBridge.service;
-        if (s != null) {
-            try {
-                String out = s.exec(cmd, maxLines, timeoutMs);
-                List<String> l = new ArrayList<>();
-                if (out != null && !out.isEmpty()) Collections.addAll(l, out.split("\n"));
-                return l;
-            } catch (Exception ignored) {
-                // servis koptuysa yerel yola düş
-            }
+    private static List<String> run(IShellService service, int maxLines, int timeoutMs, String... cmd) {
+        if (service == null) return runLocal(maxLines, timeoutMs, cmd);
+        try {
+            String out = service.exec(cmd, maxLines, timeoutMs);
+            if (out != null && !out.isEmpty()) return java.util.Arrays.asList(out.split("\\n"));
+        } catch (android.os.RemoteException ignored) {
+            // Sıradaki kaynak aynı örnek içinde denenir.
         }
-        if (!Support.dump) return new ArrayList<>();
-        return runLocal(maxLines, timeoutMs, cmd);
+        return Collections.emptyList();
     }
 
     private static List<String> runLocal(int maxLines, int timeoutMs, String... cmd) {

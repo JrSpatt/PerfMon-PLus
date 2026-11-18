@@ -12,8 +12,6 @@ final class Prefs {
     static final int SCALE_DEF = 100;
     static final String ALPHA = "bg_alpha";
     static final int ALPHA_DEF = 80;
-    static final String POS_X = "pos_x";
-    static final String POS_Y = "pos_y";
     static final String REVERSE_CURRENT = "reverse_current";
     static final String GROUP = "group_clusters";
     static final String LOCK = "lock_pos";

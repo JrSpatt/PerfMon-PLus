@@ -17,8 +17,6 @@ final class ShizukuBridge {
 
     /** Bağlıysa shell yetkili komut servisi, değilse null. */
     static volatile IShellService service;
-    /** Her yeni bağlantıda artar; ölçüm kodu eski hata sayaçlarını sıfırlar. */
-    static volatile int generation;
     /** Durum değişince çağrılır (herhangi bir thread'den). */
     static volatile Runnable onChange;
 
@@ -30,7 +28,6 @@ final class ShizukuBridge {
         public void onServiceConnected(ComponentName name, IBinder binder) {
             service = binder != null && binder.pingBinder() ? IShellService.Stub.asInterface(binder) : null;
             binding = false;
-            generation++;
             notifyChange();
         }
 
@@ -50,7 +47,7 @@ final class ShizukuBridge {
                 .daemon(false)
                 .processNameSuffix("shell")
                 .debuggable(false)
-                .version(1)
+                .version(2)
                 .tag("perfmon-shell");
         Shizuku.addBinderReceivedListenerSticky(() -> {
             tryBind();
@@ -62,6 +59,7 @@ final class ShizukuBridge {
             notifyChange();
         });
         Shizuku.addRequestPermissionResultListener((code, result) -> {
+            if (code != REQUEST_CODE) return;
             if (result == PackageManager.PERMISSION_GRANTED) tryBind();
             notifyChange();
         });

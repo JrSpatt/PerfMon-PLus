@@ -19,6 +19,9 @@ public class ShellUserService extends IShellService.Stub {
 
     @Override
     public String exec(String[] cmd, int maxLines, int timeoutMs) {
+        if (!isMeasurement(cmd)) return "";
+        maxLines = maxLines <= 0 ? 8000 : Math.min(8000, maxLines);
+        final int timeout = Math.max(100, Math.min(4000, timeoutMs));
         StringBuilder out = new StringBuilder();
         Process p = null;
         Thread killer = null;
@@ -27,7 +30,7 @@ public class ShellUserService extends IShellService.Stub {
             final Process fp = p;
             killer = new Thread(() -> {
                 try {
-                    Thread.sleep(timeoutMs);
+                    Thread.sleep(timeout);
                     fp.destroy();
                 } catch (InterruptedException ignored) {
                 }
@@ -38,6 +41,7 @@ public class ShellUserService extends IShellService.Stub {
             String l;
             int n = 0;
             while ((l = r.readLine()) != null) {
+                if (out.length() + l.length() > 240000) break;
                 out.append(l).append('\n');
                 if (maxLines > 0 && ++n >= maxLines) break;
             }
@@ -47,5 +51,12 @@ public class ShellUserService extends IShellService.Stub {
             if (p != null) p.destroy();
         }
         return out.toString();
+    }
+    private static boolean isMeasurement(String[] cmd) {
+        if (cmd == null || cmd.length < 3 || !"dumpsys".equals(cmd[0])) return false;
+        if ("activity".equals(cmd[1]))
+            return cmd.length == 3 && ("activities".equals(cmd[2]) || "top".equals(cmd[2]));
+        return "SurfaceFlinger".equals(cmd[1]) && ((cmd.length == 3 && "--list".equals(cmd[2]))
+                || (cmd.length == 4 && "--latency".equals(cmd[2]) && cmd[3] != null && !cmd[3].startsWith("-")));
     }
 }

@@ -72,7 +72,6 @@ final class Monitor {
         worker = new Handler(thread.getLooper());
         worker.post(() -> {
             if (wantFps) {
-                FpsMeter.detect(ctx);
                 fpsMeter = new FpsMeter(ctx);
             }
             tick.run();
@@ -99,7 +98,7 @@ final class Monitor {
 
     private Snapshot sample() {
         Snapshot s = new Snapshot();
-        int n = CpuTopology.get().count;
+        int n = freqPaths.length;
         s.cpuOnline = new int[n];
         s.cpuFreq = new int[n];
         s.cpuLoad = new int[n];
@@ -138,7 +137,7 @@ final class Monitor {
         if (wantFps && fpsMeter != null) {
             s.fps = fpsMeter.read();
         }
-        s.fpsMode = fpsMeter != null ? fpsMeter.lastMode : Support.fpsMode;
+        s.fpsMode = fpsMeter != null ? fpsMeter.lastMode : FpsMeter.MODE_NONE;
 
         if (wantMinBw) s.minCpuBw = Sysfs.readLong(Support.pMinCpuBw);
         if (wantCpuBw) s.cpuBw = Sysfs.readLong(Support.pCpuBw);

@@ -53,12 +53,10 @@
     <string name="about_origin">PerfMon+ — LibXZR tarafından geliştirilen açık kaynak proje</string>
     <string name="about_license">© 2019 LibXZR · BSD 3-Clause</string>
     <string name="about_github">github.com/libxzr/PerfMon-Plus</string>
-    <string name="about_translated">Türkçeleştirildi: </string>
-    <string name="about_translator">@al1deburdanyak</string>
+    <string name="about_developer">Geliştirildi:\u0020</string>
+    <string name="developer_handle">@al1deburdanyak</string>
     <string name="about_version">Sürüm %s</string>
-    <string name="sec_preview">Önizleme ve konum</string>
     <string name="lock_pos">Konumu kilitle (dokunuşlar oyuna geçer)</string>
-    <string name="drag_hint">Kutuyu sürükleyerek konumu seç</string>
     <string name="shizuku">Shizuku</string>
     <string name="shz_off">Çalışmıyor</string>
     <string name="shz_need">İzin gerekli</string>
@@ -66,4 +64,10 @@
     <string name="shz_on">Bağlı</string>
     <string name="shz_request">Shizuku izni iste</string>
     <string name="shz_open">Shizuku\'yu aç</string>
+    <string name="position">Konum</string>
+    <string name="portrait">Dikey</string>
+    <string name="landscape">Yatay</string>
+    <string name="pin_action">Göstergeyi sabitle</string>
+    <string name="close_action">Monitörü durdur</string>
+    <string name="idle_source">—</string>
 </resources>

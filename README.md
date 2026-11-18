@@ -1,22 +1,29 @@
-# PerfMon+ (fork)
+# PerfMon+
 
-Android için kayan pencere (overlay) performans monitörü: CPU küme frekansı/yükü, GPU, sıcaklık, RAM, güç (W/mA), pil sıcaklığı ve FPS.
+Android için kayan performans göstergesi. CPU, GPU, bellek, sıcaklık, batarya ve kare hızı ölçümlerini cihazın desteklediği kaynaklardan okur.
 
-## Rootsuz FPS
+## Kullanım
 
-Öndeki uygulamanın gerçek FPS'ini görmek için bir kez şu komut çalıştırılır (adb, Shizuku veya root):
+**Monitörü başlat** düğmesine dokunup diğer uygulamaların üzerinde gösterme iznini verin. Göstergeyi sürükleyebilir veya **Konum** bölümünden dikey ve yatay yerleşimi ayrı ayarlayabilirsiniz. Gösterge üzerindeki iğne konumu kilitler. Kilidi Konum bölümünden açabilirsiniz. Gösterge uygulamadan, bildirimden veya Hızlı Ayarlar kutucuğundan durdurulabilir.
+
+Oyun FPS’i için Shizuku’yu başlatıp PerfMon+’a izin verin. Doğrudan DUMP izni olan kurulumlar da desteklenir. İsteğe bağlı ADB komutu:
 
 ```
-pm grant xzr.perfmon android.permission.DUMP
+adb shell pm grant com.spatt.perfmon android.permission.DUMP
 ```
 
-İzin yoksa sırayla ekran paneli FPS'ine, o da okunamazsa ekranın Hz değerine düşer. Uygulamadaki "Cihaz uyumluluğu" kartı hangi kaynağın kullanıldığını gösterir.
+Oyun ölçümü alınamazsa erişilebilen panel verisi kullanılır. İkisi de okunamazsa ekran yenileme hızı **Hz** olarak gösterilir. Son ölçümün kaynağı **Cihaz uyumluluğu** bölümündedir.
 
-## Derleme
+## Derleme ve dağıtım
 
-GitHub Actions (`.github/workflows/build.yml`) her push'ta release APK üretir; çıktı "Actions → Artifacts" altındadır. Yerelde: `./gradlew assembleRelease`.
+JDK 17 gerekir. Windows’ta yerel test APK’sı için `gradlew.bat :app:assembleDebug` çalıştırın.
 
-## Krediler
+GitHub deposunda **Settings → Secrets and variables → Actions** altında `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` ve `KEY_PASSWORD` repository secret’larını tanımlayın. İlk değer keystore dosyasının tek satır Base64 karşılığıdır.
 
-* Orijinal proje: **PerfMon+ — LibXZR** (https://github.com/libxzr/PerfMon-Plus), BSD 3-Clause, © 2019 LibXZR. Lisans metni `LICENSE` dosyasındadır ve korunmalıdır.
-* Türkçeleştirme: @al1deburdanyak
+Push ve manuel Actions çalıştırmaları imzalı APK’yı **Artifacts → PerfMon-Plus** altında sunar. `v1.0` gibi bir etiket gönderildiğinde aynı çalıştırmanın doğrulanmış APK’sı GitHub Releases’a da yüklenir. İmzalama bilgileri eksikse release derlemesi hata verir.
+
+## Katkılar
+
+Orijinal proje LibXZR tarafından geliştirildi. [PerfMon+](https://github.com/libxzr/PerfMon-Plus) · [BSD 3-Clause](LICENSE)
+
+Geliştirme ve Türkçeleştirme [@al1deburdanyak](https://t.me/al1deburdanyak).

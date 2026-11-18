@@ -5,7 +5,8 @@
 
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- Rootsuz FPS için: pm grant xzr.perfmon android.permission.DUMP -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Rootsuz FPS için: pm grant com.spatt.perfmon android.permission.DUMP -->
     <uses-permission
         android:name="android.permission.DUMP"
         tools:ignore="ProtectedPermissions" />

@@ -9,9 +9,6 @@ import java.io.File;
 final class Support {
     static boolean cpuFreq, cpuLoad, gpuFreq, gpuLoad, temp, power, fps;
     static boolean minCpuBw, cpuBw, gpuBw, llcBw, m4m;
-    static boolean dump;
-    static boolean shizuku;
-    static int fpsMode = FpsMeter.MODE_HZ;
 
     static String gpuFreqPath;
     static long gpuFreqDiv = 1;

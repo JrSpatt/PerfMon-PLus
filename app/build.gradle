@@ -2,29 +2,40 @@ plugins {
     id 'com.android.application'
 }
 
+def signingFile = System.getenv('PERFMON_KEYSTORE')
+
 android {
     namespace 'xzr.perfmon'
-    compileSdk 33
+    compileSdk 34
+    buildToolsVersion '34.0.0'
 
     defaultConfig {
-        applicationId "xzr.perfmon"
+        applicationId 'com.spatt.perfmon'
         minSdk 24
         targetSdk 33
-        versionCode 20
-        versionName "2.0.0"
+        versionCode 1
+        versionName '1.0'
+    }
+
+    signingConfigs {
+        if (signingFile) {
+            release {
+                storeFile file(signingFile)
+                storePassword System.getenv('KEYSTORE_PASSWORD')
+                keyAlias System.getenv('KEY_ALIAS')
+                keyPassword System.getenv('KEY_PASSWORD')
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
-            // Kişisel kullanım: release APK debug anahtarıyla imzalanır, doğrudan kurulabilir
-            signingConfig signingConfigs.debug
+            if (signingFile) signingConfig signingConfigs.release
         }
     }
 
-    buildFeatures {
-        aidl true
-    }
+    buildFeatures { aidl true }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8

@@ -1,27 +1,77 @@
-name: Build APK
+name: Build PerfMon+
 
 on:
   push:
-    branches: [main, master]
+    branches: ['**']
+    tags: ['v*']
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  build:
+  apk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Build release APK
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+      - name: Build and verify signed APK
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
-
+          set -euo pipefail
+          for key in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [[ -z "${!key:-}" ]]; then echo "::error::Missing secret $key"; exit 1; fi
+          done
+          umask 077
+          export PERFMON_KEYSTORE="$RUNNER_TEMP/perfmon-release.keystore"
+          trap 'rm -f -- "$PERFMON_KEYSTORE"' EXIT
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$PERFMON_KEYSTORE"
+          unset KEYSTORE_BASE64
+          bash ./gradlew :app:assembleRelease --no-daemon
+          apk=app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose "$apk"
+          mkdir -p dist
+          cp "$apk" dist/PerfMon-Plus.apk
       - uses: actions/upload-artifact@v4
         with:
           name: PerfMon-Plus
-          path: app/build/outputs/apk/release/*.apk
+          path: dist/PerfMon-Plus.apk
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    needs: apk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: PerfMon-Plus
+          path: dist
+      - uses: actions/checkout@v4
+        with:
+          path: source
+      - name: Publish tagged APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/PerfMon-Plus.apk --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/PerfMon-Plus.apk --verify-tag --title "PerfMon+ $RELEASE_TAG" --notes-file source/CHANGELOG.md
+          fi

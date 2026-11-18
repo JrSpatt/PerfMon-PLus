@@ -54,6 +54,32 @@ final class Ui {
         return l;
     }
 
+    static LinearLayout collapsible(Context c, LinearLayout body, String key, boolean initial) {
+        TextView title = (TextView) body.getChildAt(0);
+        LinearLayout header = row(c);
+        TextView arrow = text(c, "", 18, Theme.MUTED);
+        body.removeView(title);
+        title.setPadding(0, 0, 0, 0);
+        header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        header.addView(arrow);
+        header.setMinimumHeight(dp(c, 36));
+        body.addView(header, 0);
+        Runnable update = () -> {
+            boolean open = Prefs.on(key, initial);
+            arrow.setText(open ? "▴" : "▾");
+            header.setContentDescription(title.getText() + (open ? ", daralt" : ", genişlet"));
+            for (int i = 1; i < body.getChildCount(); i++)
+                body.getChildAt(i).setVisibility(open ? View.VISIBLE : View.GONE);
+        };
+        header.setFocusable(true);
+        header.setOnClickListener(v -> {
+            Prefs.sp.edit().putBoolean(key, !Prefs.on(key, initial)).apply();
+            update.run();
+        });
+        update.run();
+        return body;
+    }
+
     static Switch toggle(Context c, CharSequence label, String key, boolean def, Runnable changed) {
         Switch s = new Switch(c);
         s.setText(label);
@@ -69,8 +95,10 @@ final class Ui {
     }
 
     /** Etiket + değer satırı ve altında kaydırıcı. Değer Prefs'e tam sayı olarak yazılır. */
+    interface ValueChange { void set(int value); }
+
     static LinearLayout slider(Context c, CharSequence label, String key, int min, int max, int step,
-                               int def, String unit, Runnable changed) {
+                               int def, String unit, ValueChange live, Runnable changed) {
         LinearLayout box = new LinearLayout(c);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(0, dp(c, 6), 0, dp(c, 4));
@@ -88,18 +116,30 @@ final class Ui {
         bar.setMax((max - min) / step);
         bar.setProgress((cur - min) / step);
         bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            private boolean dragging;
+
             @Override
             public void onProgressChanged(SeekBar sb, int p, boolean fromUser) {
-                value.setText((min + p * step) + " " + unit);
+                int current = min + p * step;
+                value.setText(current + " " + unit);
+                if (!fromUser) return;
+                if (live != null) live.set(current);
+                if (!dragging) commit(current);
             }
 
             @Override
             public void onStartTrackingTouch(SeekBar sb) {
+                dragging = true;
             }
 
             @Override
             public void onStopTrackingTouch(SeekBar sb) {
-                Prefs.sp.edit().putInt(key, min + sb.getProgress() * step).apply();
+                dragging = false;
+                commit(min + sb.getProgress() * step);
+            }
+
+            private void commit(int current) {
+                Prefs.sp.edit().putInt(key, current).apply();
                 if (changed != null) changed.run();
             }
         });
