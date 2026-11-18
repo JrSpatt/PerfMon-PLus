@@ -27,7 +27,7 @@ git --work-tree="%SRC%" add -f -- app/build.gradle app/.gitignore build.gradle s
 git --work-tree="%SRC%" update-index --chmod=+x gradlew || goto :failed
 git diff --cached --quiet
 if errorlevel 1 (
-  git diff --cached --stat
+  git --no-pager diff --cached --stat
   git commit -m "Release PerfMon+ 1.0" || goto :failed
 )
 git show-ref --verify --quiet "refs/tags/%RELEASE_TAG%"
