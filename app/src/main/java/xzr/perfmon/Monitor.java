@@ -38,21 +38,22 @@ final class Monitor {
         this.ctx = ctx.getApplicationContext();
         this.listener = listener;
 
+        Support support = Support.get();
         delay = Math.max(200, Prefs.num(Prefs.DELAY, Prefs.DELAY_DEF));
         reverseCurrent = Prefs.on(Prefs.REVERSE_CURRENT, false);
-        wantFreq = Prefs.on(Prefs.CPUFREQ, true) && Support.cpuFreq;
-        wantLoad = Prefs.on(Prefs.CPULOAD, true) && Support.cpuLoad;
-        wantGpu = Prefs.on(Prefs.GPU, true) && (Support.gpuFreq || Support.gpuLoad);
-        wantTemp = Prefs.on(Prefs.TEMP, true) && Support.temp;
+        wantFreq = Prefs.on(Prefs.CPUFREQ, true) && support.cpuFreq;
+        wantLoad = Prefs.on(Prefs.CPULOAD, true) && support.cpuLoad;
+        wantGpu = Prefs.on(Prefs.GPU, true) && (support.gpuFreq || support.gpuLoad);
+        wantTemp = Prefs.on(Prefs.TEMP, true) && support.temp;
         wantMem = Prefs.on(Prefs.MEM, true);
-        wantPower = Prefs.on(Prefs.POWER, true) && Support.power;
+        wantPower = (Prefs.on(Prefs.POWER, true) || Prefs.on(Prefs.POWER_WATTS, true)) && support.power;
         wantBatt = Prefs.on(Prefs.BATT, true);
-        wantFps = Prefs.on(Prefs.FPS, true) && Support.fps;
-        wantMinBw = Prefs.on(Prefs.MINCPUBW, false) && Support.minCpuBw;
-        wantCpuBw = Prefs.on(Prefs.CPUBW, false) && Support.cpuBw;
-        wantGpuBw = Prefs.on(Prefs.GPUBW, false) && Support.gpuBw;
-        wantLlcBw = Prefs.on(Prefs.LLCBW, false) && Support.llcBw;
-        wantM4m = Prefs.on(Prefs.M4M, false) && Support.m4m;
+        wantFps = Prefs.on(Prefs.FPS, true);
+        wantMinBw = Prefs.on(Prefs.MINCPUBW, false) && support.minCpuBw;
+        wantCpuBw = Prefs.on(Prefs.CPUBW, false) && support.cpuBw;
+        wantGpuBw = Prefs.on(Prefs.GPUBW, false) && support.gpuBw;
+        wantLlcBw = Prefs.on(Prefs.LLCBW, false) && support.llcBw;
+        wantM4m = Prefs.on(Prefs.M4M, false) && support.m4m;
 
         int n = CpuTopology.get().count;
         freqPaths = new String[n];
@@ -97,12 +98,15 @@ final class Monitor {
     };
 
     private Snapshot sample() {
+        Support support = Support.get();
         Snapshot s = new Snapshot();
         int n = freqPaths.length;
         s.cpuOnline = new int[n];
         s.cpuFreq = new int[n];
         s.cpuLoad = new int[n];
 
+        java.util.Arrays.fill(s.cpuLoad, -1);
+        java.util.Arrays.fill(s.cpuFreq, -1);
         if (wantLoad) readCpuLoad(s);
 
         for (int i = 0; i < n; i++) {
@@ -115,11 +119,11 @@ final class Monitor {
         }
 
         if (wantGpu) {
-            if (Support.gpuFreq) {
-                long v = Sysfs.readLong(Support.gpuFreqPath);
-                s.gpuFreq = v == Sysfs.NA ? -1 : (int) (v / Support.gpuFreqDiv);
+            if (support.gpuFreq) {
+                long v = Sysfs.readLong(support.gpuFreqPath);
+                s.gpuFreq = v == Sysfs.NA ? -1 : (int) (v / support.gpuFreqDiv);
             }
-            if (Support.gpuLoad) s.gpuLoad = readGpuLoad();
+            if (support.gpuLoad) s.gpuLoad = readGpuLoad(support);
         }
 
         if (wantTemp) s.cpuTemp = Thermal.readMax();
@@ -134,17 +138,14 @@ final class Monitor {
 
         if (wantPower || wantBatt) readBattery(s);
 
-        if (wantFps && fpsMeter != null) {
-            s.fps = fpsMeter.read();
-        }
-        s.fpsMode = fpsMeter != null ? fpsMeter.lastMode : FpsMeter.MODE_NONE;
+        if (wantFps && fpsMeter != null) s.frame = fpsMeter.read();
 
-        if (wantMinBw) s.minCpuBw = Sysfs.readLong(Support.pMinCpuBw);
-        if (wantCpuBw) s.cpuBw = Sysfs.readLong(Support.pCpuBw);
-        if (wantGpuBw) s.gpuBw = Sysfs.readLong(Support.pGpuBw);
-        if (wantLlcBw) s.llcBw = Sysfs.readLong(Support.pLlcBw);
+        if (wantMinBw) s.minCpuBw = Sysfs.readLong(support.pMinCpuBw);
+        if (wantCpuBw) s.cpuBw = Sysfs.readLong(support.pCpuBw);
+        if (wantGpuBw) s.gpuBw = Sysfs.readLong(support.pGpuBw);
+        if (wantLlcBw) s.llcBw = Sysfs.readLong(support.pLlcBw);
         if (wantM4m) {
-            long v = Sysfs.readLong(Support.pM4m);
+            long v = Sysfs.readLong(support.pM4m);
             s.m4m = v == Sysfs.NA ? -1 : v / 1000;
         }
         return s;
@@ -174,18 +175,18 @@ final class Monitor {
         }
     }
 
-    private int readGpuLoad() {
-        if (Support.gpuLoadKind == 0) {
-            long v = Sysfs.readLong(Support.gpuLoadPath);
-            return v == Sysfs.NA ? -1 : (int) v;
+    private int readGpuLoad(Support support) {
+        if (support.gpuLoadKind == 0) {
+            long v = Sysfs.readLong(support.gpuLoadPath);
+            return v < 0 || v > 100 ? -1 : (int) v;
         }
-        String t = Sysfs.readString(Support.gpuLoadPath);
+        String t = Sysfs.readString(support.gpuLoadPath);
         if (t == null) return -1;
         String[] p = t.trim().split("\\s+");
         try {
             long a = Long.parseLong(p[0]);
             long b = Long.parseLong(p[1]);
-            return b <= 0 ? 0 : (int) Math.min(100, 100 * a / b);
+            return b <= 0 || a < 0 || a > b ? -1 : (int) (100.0 * a / b);
         } catch (Exception e) {
             return -1;
         }

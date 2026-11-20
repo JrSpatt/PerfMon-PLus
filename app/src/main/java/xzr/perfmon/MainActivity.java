@@ -38,6 +38,7 @@ public class MainActivity extends Activity {
     private boolean editLandscape, resumed, syncingLock;
     private int probeGeneration;
     private boolean startingAfterNotification;
+    private static boolean waitingForWindow;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -116,8 +117,13 @@ public class MainActivity extends Activity {
     }
 
     private void refreshControls() {
-        if (startStop == null) return;
         boolean on = FloatingWindow.running;
+        if (waitingForWindow && (on || FloatingWindow.startError != 0)) {
+            waitingForWindow = false;
+            if (on && resumed) moveTaskToBack(true);
+        }
+        if (startStop == null) return;
+        startStop.setEnabled(!waitingForWindow);
         statePill.setText(on ? R.string.state_on : R.string.state_off);
         statePill.setTextColor(on ? Theme.BG : Theme.MUTED);
         statePill.setBackground(Ui.round(this, on ? Theme.ACCENT : Theme.SURFACE_HI, 20));
@@ -131,16 +137,9 @@ public class MainActivity extends Activity {
         }
         if (map != null) map.refresh();
         if (sourceValue != null) {
-            int source = FloatingWindow.source();
-            int label;
-            switch (source) {
-                case FpsMeter.MODE_SHIZUKU: label = R.string.fps_src_shizuku; break;
-                case FpsMeter.MODE_DUMP: label = R.string.fps_src_app; break;
-                case FpsMeter.MODE_PANEL: label = R.string.fps_src_panel; break;
-                case FpsMeter.MODE_HZ: label = R.string.fps_src_hz; break;
-                default: label = R.string.idle_source;
-            }
-            sourceValue.setText(label);
+            FpsMeter.Reading r = FloatingWindow.frames.current;
+            sourceValue.setText(r != FpsMeter.Reading.IDLE && r.mode == FpsMeter.MODE_NONE
+                    ? R.string.fps_no_source : sourceLabel(r.mode));
         }
     }
 
@@ -218,23 +217,38 @@ public class MainActivity extends Activity {
         LinearLayout card = Ui.card(c, getString(R.string.sec_monitor));
         Runnable r = this::onSettingChanged;
 
+        Support support = Support.get();
+        card.addView(Ui.toggle(c, getString(R.string.fps), Prefs.FPS, true, r));
+        if (support.cpuFreq || support.cpuLoad) {
+            LinearLayout cpu = new LinearLayout(c);
+            cpu.setOrientation(LinearLayout.VERTICAL);
+            cpu.addView(Ui.text(c, "CPU", 13, Theme.MUTED));
+            java.util.List<View> cpuMetrics = new java.util.ArrayList<>();
+            if (support.cpuFreq)
+                cpuMetrics.add(Ui.toggle(c, getString(R.string.cpu_freq), Prefs.CPUFREQ, true, r));
+            if (support.cpuLoad)
+                cpuMetrics.add(Ui.toggle(c, getString(R.string.cpu_load), Prefs.CPULOAD, true, r));
+            cpu.addView(Ui.grid(c, cpuMetrics, 2));
+            if (CpuTopology.get().clusters.length > 1) {
+                Switch group = Ui.toggle(c, getString(R.string.group_clusters), Prefs.GROUP, true, r);
+                group.setPadding(Ui.dp(c, 16), 0, 0, 0);
+                cpu.addView(group);
+            }
+            card.addView(cpu);
+        }
+
         java.util.List<View> items = new java.util.ArrayList<>();
-        items.add(Ui.toggle(c, getString(R.string.fps), Prefs.FPS, true, r));
-        if (Support.cpuFreq)
-            items.add(Ui.toggle(c, getString(R.string.cpu_freq), Prefs.CPUFREQ, true, r));
-        if (Support.cpuLoad)
-            items.add(Ui.toggle(c, getString(R.string.cpu_load), Prefs.CPULOAD, true, r));
-        if (Support.cpuFreq || Support.cpuLoad)
-            items.add(Ui.toggle(c, getString(R.string.group_clusters), Prefs.GROUP, true, r));
-        if (Support.gpuFreq || Support.gpuLoad)
+        if (support.gpuFreq || support.gpuLoad)
             items.add(Ui.toggle(c, getString(R.string.gpu), Prefs.GPU, true, r));
-        if (Support.temp)
+        if (support.temp)
             items.add(Ui.toggle(c, getString(R.string.cpu_temp), Prefs.TEMP, true, r));
         items.add(Ui.toggle(c, getString(R.string.ram), Prefs.MEM, true, r));
-        if (Support.power)
-            items.add(Ui.toggle(c, getString(R.string.power), Prefs.POWER, true, r));
         items.add(Ui.toggle(c, getString(R.string.batt_temp), Prefs.BATT, true, r));
         card.addView(Ui.grid(c, items, 2));
+        if (support.power) {
+            card.addView(Ui.toggle(c, getString(R.string.power), Prefs.POWER, true, r));
+            card.addView(Ui.toggle(c, getString(R.string.power_watts), Prefs.POWER_WATTS, true, r));
+        }
         return card;
     }
 
@@ -247,7 +261,7 @@ public class MainActivity extends Activity {
                 70, 150, 5, Prefs.SCALE_DEF, "%", value -> FloatingWindow.appearance(Prefs.SCALE, value), null));
         card.addView(Ui.slider(c, getString(R.string.opacity), Prefs.ALPHA,
                 20, 100, 5, Prefs.ALPHA_DEF, "%", value -> FloatingWindow.appearance(Prefs.ALPHA, value), null));
-        if (Support.power)
+        if (Support.get().power)
             card.addView(Ui.toggle(c, getString(R.string.reverse_current), Prefs.REVERSE_CURRENT, false, r));
         return card;
     }
@@ -255,15 +269,16 @@ public class MainActivity extends Activity {
     private View advancedCard(Context c) {
         LinearLayout card = Ui.card(c, getString(R.string.sec_advanced));
         Runnable r = this::onSettingChanged;
-        if (Support.minCpuBw)
+        Support support = Support.get();
+        if (support.minCpuBw)
             card.addView(Ui.toggle(c, getString(R.string.bw_min_cpu), Prefs.MINCPUBW, false, r));
-        if (Support.cpuBw)
+        if (support.cpuBw)
             card.addView(Ui.toggle(c, getString(R.string.bw_cpu), Prefs.CPUBW, false, r));
-        if (Support.gpuBw)
+        if (support.gpuBw)
             card.addView(Ui.toggle(c, getString(R.string.bw_gpu), Prefs.GPUBW, false, r));
-        if (Support.llcBw)
+        if (support.llcBw)
             card.addView(Ui.toggle(c, getString(R.string.bw_llc), Prefs.LLCBW, false, r));
-        if (Support.m4m)
+        if (support.m4m)
             card.addView(Ui.toggle(c, getString(R.string.m4m), Prefs.M4M, false, r));
 
         Button se = Ui.button(c, getString(R.string.permissive_selinux), Theme.SURFACE_HI, Theme.TEXT);
@@ -292,8 +307,9 @@ public class MainActivity extends Activity {
         String[] names = {getString(R.string.cpu_freq), getString(R.string.cpu_load),
                 "GPU MHz", "GPU %", getString(R.string.cpu_temp), getString(R.string.ram),
                 getString(R.string.power), getString(R.string.batt_temp)};
-        boolean[] ok = {Support.cpuFreq, Support.cpuLoad, Support.gpuFreq, Support.gpuLoad,
-                Support.temp, true, Support.power, true};
+        Support support = Support.get();
+        boolean[] ok = {support.cpuFreq, support.cpuLoad, support.gpuFreq, support.gpuLoad,
+                support.temp, true, support.power, true};
         for (int i = 0; i < names.length; i += 2) {
             LinearLayout line = new LinearLayout(c);
             line.addView(chip(c, names[i], ok[i]), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
@@ -307,12 +323,20 @@ public class MainActivity extends Activity {
                 new LinearLayout.LayoutParams(0, -2, 1));
         sourceValue = Ui.text(c, getString(R.string.idle_source), 14, Theme.ACCENT);
         sourceRow.addView(sourceValue);
+        TextView arrow = Ui.text(c, "›", 18, Theme.MUTED);
+        arrow.setPadding(Ui.dp(c, 8), 0, 0, 0);
+        arrow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        sourceRow.addView(arrow);
+        sourceRow.setMinimumHeight(Ui.dp(c, 48));
+        sourceRow.setFocusable(true);
+        sourceRow.setOnClickListener(v -> showFrameDetails());
         card.addView(sourceRow);
 
         // Shizuku
         int st = ShizukuBridge.state();
         int stRes = st == ShizukuBridge.STATE_READY ? R.string.shz_on
                 : st == ShizukuBridge.STATE_CONNECTING ? R.string.shz_wait
+                : st == ShizukuBridge.STATE_DISCONNECTED ? R.string.shz_disconnected
                 : st == ShizukuBridge.STATE_NEED_PERMISSION ? R.string.shz_need : R.string.shz_off;
         card.addView(infoRow(c, getString(R.string.shizuku), getString(stRes),
                 st == ShizukuBridge.STATE_READY ? Theme.ACCENT : Theme.WARN));
@@ -321,6 +345,10 @@ public class MainActivity extends Activity {
             Button ask = Ui.button(c, getString(R.string.shz_request), Theme.SURFACE_HI, Theme.ACCENT);
             ask.setOnClickListener(v -> ShizukuBridge.requestPermission());
             card.addView(ask);
+        } else if (st == ShizukuBridge.STATE_DISCONNECTED) {
+            Button retry = Ui.button(c, getString(R.string.shz_retry), Theme.SURFACE_HI, Theme.ACCENT);
+            retry.setOnClickListener(v -> ShizukuBridge.tryBind());
+            card.addView(retry);
         } else if (st == ShizukuBridge.STATE_OFF) {
             Intent launch = getPackageManager().getLaunchIntentForPackage(ShizukuBridge.SHIZUKU_PACKAGE);
             if (launch != null) {
@@ -330,6 +358,66 @@ public class MainActivity extends Activity {
             }
         }
         return card;
+    }
+
+    private int sourceLabel(int mode) {
+        switch (mode) {
+            case FpsMeter.MODE_SHIZUKU: return R.string.fps_src_shizuku;
+            case FpsMeter.MODE_DUMP: return R.string.fps_src_app;
+            case FpsMeter.MODE_PANEL: return R.string.fps_src_panel;
+            case FpsMeter.MODE_HZ: return R.string.fps_src_hz;
+            default: return R.string.idle_source;
+        }
+    }
+
+    private String sourceDetail(FpsMeter.Reading r) {
+        if (r == FpsMeter.Reading.IDLE) {
+            if (!FloatingWindow.running) return getString(R.string.state_off);
+            return getString(Prefs.on(Prefs.FPS, true) ? R.string.fps_waiting : R.string.fps_disabled);
+        }
+        String name = getString(r.mode == FpsMeter.MODE_NONE ? R.string.fps_no_source : sourceLabel(r.mode));
+        return r.reason == 0 ? name : name + " · " + getString(r.reason);
+    }
+
+    private String appLabel(String pkg) {
+        try {
+            PackageManager pm = getPackageManager();
+            return pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString();
+        } catch (PackageManager.NameNotFoundException e) {
+            return pkg;
+        }
+    }
+
+    private String age(long time) {
+        long seconds = Math.max(0, android.os.SystemClock.elapsedRealtime() - time) / 1000;
+        if (seconds < 60) return getResources().getQuantityString(R.plurals.fps_seconds_ago, (int) seconds, seconds);
+        if (seconds < 3600) return getResources().getQuantityString(R.plurals.fps_minutes_ago, (int) (seconds / 60), seconds / 60);
+        return getResources().getQuantityString(R.plurals.fps_hours_ago, (int) (seconds / 3600), seconds / 3600);
+    }
+
+    private void showFrameDetails() {
+        new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle(R.string.fps_src).setMessage(frameDetails(FloatingWindow.frames))
+                .setPositiveButton(R.string.ok, null).show();
+    }
+
+    CharSequence frameDetails(FrameHistory h) {
+        StringBuilder message = new StringBuilder(sourceDetail(h.current));
+        FpsMeter.Reading fallback = h.lastFallback;
+        if (fallback != null && fallback != h.current) {
+            message.append("\n\n").append(getString(R.string.fps_last_outside)).append("\n");
+            if (fallback.pkg != null) message.append(appLabel(fallback.pkg)).append(" · ");
+            message.append(sourceDetail(fallback)).append(" · ").append(age(fallback.time));
+        }
+        message.append("\n\n").append(getString(R.string.fps_last_app)).append("\n");
+        if (h.lastApp == null) {
+            message.append(getString(R.string.fps_no_history));
+        } else {
+            message.append(appLabel(h.lastApp.pkg)).append(" · ")
+                    .append(h.lastApp.mode == FpsMeter.MODE_SHIZUKU ? "Shizuku" : "DUMP")
+                    .append(" · ").append(age(h.lastApp.time));
+        }
+        return message;
     }
 
     private View aboutCard(Context c) {
@@ -413,9 +501,17 @@ public class MainActivity extends Activity {
 
     private void startMonitor() {
         Intent intent = new Intent(this, FloatingWindow.class);
-        if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent);
-        else startService(intent);
-        moveTaskToBack(true);
+        waitingForWindow = true;
+        FloatingWindow.startError = 0;
+        refreshControls();
+        try {
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent);
+            else startService(intent);
+        } catch (RuntimeException e) {
+            waitingForWindow = false;
+            refreshControls();
+            Toast.makeText(this, R.string.window_open_error, Toast.LENGTH_LONG).show();
+        }
     }
 
     private void setEnforce(int mode) {

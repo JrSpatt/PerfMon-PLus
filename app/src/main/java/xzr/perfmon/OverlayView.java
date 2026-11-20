@@ -37,6 +37,7 @@ final class OverlayView extends LinearLayout {
     private final List<Row> rows = new ArrayList<>();
     private final TextView title;
     private final GradientDrawable background = new GradientDrawable();
+    private final Support support = Support.get();
     private final boolean showFreq, showLoad;
     private float sp;
 
@@ -44,8 +45,8 @@ final class OverlayView extends LinearLayout {
         super(c);
         setOrientation(VERTICAL);
         setBackground(background);
-        showFreq = Prefs.on(Prefs.CPUFREQ, true) && Support.cpuFreq;
-        showLoad = Prefs.on(Prefs.CPULOAD, true) && Support.cpuLoad;
+        showFreq = Prefs.on(Prefs.CPUFREQ, true) && support.cpuFreq;
+        showLoad = Prefs.on(Prefs.CPULOAD, true) && support.cpuLoad;
         LinearLayout head = Ui.row(c);
         title = Ui.text(c, "PerfMon+", 11, Theme.ACCENT);
         title.setTypeface(Typeface.DEFAULT_BOLD);
@@ -102,9 +103,9 @@ final class OverlayView extends LinearLayout {
     }
 
     private void buildRows(Context c) {
-        if (Prefs.on(Prefs.FPS, true) && Support.fps) {
-            addRow(c, null, s -> s.fps < 0 ? "--" : String.format(Locale.US, "%.0f", s.fps),
-                    s -> s.fpsMode == FpsMeter.MODE_HZ ? "Hz" : "FPS");
+        if (Prefs.on(Prefs.FPS, true)) {
+            addRow(c, null, s -> s.frame.value < 0 ? "--" : String.format(Locale.US, "%.0f", s.frame.value),
+                    s -> s.frame.mode == FpsMeter.MODE_HZ ? "Hz" : "FPS");
         }
 
         if (showFreq || showLoad) {
@@ -117,63 +118,65 @@ final class OverlayView extends LinearLayout {
                 }
             } else {
                 for (int i = 0; i < topo.count; i++) {
-                    final int id = i;
-                    addRow(c, "cpu" + i, s -> clusterText(s, new int[]{id}), null);
+                    final int[] cpu = {i};
+                    addRow(c, "CPU " + i, s -> clusterText(s, cpu), null);
                 }
             }
         }
 
-        if (Prefs.on(Prefs.GPU, true) && (Support.gpuFreq || Support.gpuLoad)) {
-            addRow(c, "GPU", s -> {
-                StringBuilder b = new StringBuilder();
-                if (Support.gpuFreq) b.append(String.format(Locale.US, "%d MHz", s.gpuFreq));
-                if (Support.gpuLoad) b.append(b.length() > 0 ? " " : "").append(String.format(Locale.US, "%d%%", s.gpuLoad));
-                return b.toString();
-            }, null);
+        if (Prefs.on(Prefs.GPU, true) && (support.gpuFreq || support.gpuLoad)) {
+            addRow(c, "GPU", s -> metrics(support.gpuFreq, s.gpuFreq, support.gpuLoad, s.gpuLoad), null);
         }
 
-        if (Prefs.on(Prefs.TEMP, true) && Support.temp)
+        if (Prefs.on(Prefs.TEMP, true) && support.temp)
             addRow(c, "TEMP", s -> Float.isNaN(s.cpuTemp) ? "--" : String.format(Locale.US, "%.0f °C", s.cpuTemp), null);
 
         if (Prefs.on(Prefs.MEM, true))
             addRow(c, "RAM", s -> s.memPct < 0 ? "--" : s.memPct + "%", null);
 
-        if (Prefs.on(Prefs.POWER, true) && Support.power) {
-            addRow(c, "PWR", s -> {
-                if (s.currentMa == Integer.MIN_VALUE) return "--";
-                String w = Float.isNaN(s.powerW) ? "" : String.format(Locale.US,  "%.1f W ", s.powerW);
-                return w + s.currentMa + " mA";
-            }, null);
-        }
+        if (support.power && Prefs.on(Prefs.POWER, true))
+            addRow(c, "PWR", s -> s.currentMa == Integer.MIN_VALUE ? "--" : s.currentMa + " mA", null);
+        if (support.power && Prefs.on(Prefs.POWER_WATTS, true))
+            addRow(c, "PWR W", s -> Float.isNaN(s.powerW) ? "--" : String.format(Locale.US, "%.1f W", s.powerW), null);
 
         if (Prefs.on(Prefs.BATT, true))
             addRow(c, "BAT", s -> Float.isNaN(s.battTemp) ? "--" : String.format(Locale.US, "%.1f °C", s.battTemp), null);
 
-        if (Prefs.on(Prefs.MINCPUBW, false) && Support.minCpuBw)
-            addRow(c, "MINBW", s -> String.valueOf(s.minCpuBw), null);
-        if (Prefs.on(Prefs.CPUBW, false) && Support.cpuBw)
-            addRow(c, "CPUBW", s -> String.valueOf(s.cpuBw), null);
-        if (Prefs.on(Prefs.GPUBW, false) && Support.gpuBw)
-            addRow(c, "GPUBW", s -> String.valueOf(s.gpuBw), null);
-        if (Prefs.on(Prefs.LLCBW, false) && Support.llcBw)
-            addRow(c, "LLCBW", s -> String.valueOf(s.llcBw), null);
-        if (Prefs.on(Prefs.M4M, false) && Support.m4m)
-            addRow(c, "M4M", s -> s.m4m + " MHz", null);
+        if (Prefs.on(Prefs.MINCPUBW, false) && support.minCpuBw)
+            addRow(c, "MINBW", s -> metric(s.minCpuBw, ""), null);
+        if (Prefs.on(Prefs.CPUBW, false) && support.cpuBw)
+            addRow(c, "CPUBW", s -> metric(s.cpuBw, ""), null);
+        if (Prefs.on(Prefs.GPUBW, false) && support.gpuBw)
+            addRow(c, "GPUBW", s -> metric(s.gpuBw, ""), null);
+        if (Prefs.on(Prefs.LLCBW, false) && support.llcBw)
+            addRow(c, "LLCBW", s -> metric(s.llcBw, ""), null);
+        if (Prefs.on(Prefs.M4M, false) && support.m4m)
+            addRow(c, "M4M", s -> metric(s.m4m, " MHz"), null);
     }
 
     private String clusterText(Snapshot s, int[] cpus) {
-        int maxFreq = -1, loadSum = 0, online = 0;
+        int maxFreq = -1, loadSum = 0, validLoads = 0, online = 0;
         for (int id : cpus) {
             if (id >= s.cpuOnline.length || s.cpuOnline[id] != 1) continue;
             online++;
             maxFreq = Math.max(maxFreq, s.cpuFreq[id]);
-            loadSum += s.cpuLoad[id];
+            if (s.cpuLoad[id] >= 0) {
+                validLoads++;
+                loadSum += s.cpuLoad[id];
+            }
         }
         if (online == 0) return getContext().getString(R.string.offline);
-        StringBuilder b = new StringBuilder();
-        if (showFreq) b.append(String.format(Locale.US, "%d MHz", maxFreq));
-        if (showLoad) b.append(b.length() > 0 ? " " : "").append(String.format(Locale.US, "%d%%", loadSum / online));
-        return b.toString();
+        return metrics(showFreq, maxFreq, showLoad, validLoads == 0 ? -1 : loadSum / validLoads);
+    }
+
+    private static String metrics(boolean showFreq, int freq, boolean showLoad, int load) {
+        String f = showFreq ? metric(freq, " MHz") : "";
+        if (!showLoad) return f;
+        return (showFreq ? f + " " : "") + metric(load, "%");
+    }
+
+    private static String metric(long value, String unit) {
+        return value < 0 ? "--" : value + unit;
     }
 
     /** labelBind verilirse etiket her turda ondan hesaplanır (FPS / Hz geçişi için). */
@@ -189,7 +192,8 @@ final class OverlayView extends LinearLayout {
         v.setTypeface(Typeface.MONOSPACE);
         v.setGravity(Gravity.END);
         line.addView(l);
-        line.addView(v, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        line.addView(v, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         addView(line);
         rows.add(new Row(l, v, valueBind, labelBind));
     }
@@ -197,10 +201,7 @@ final class OverlayView extends LinearLayout {
     void update(Snapshot s) {
         for (Row row : rows) {
             if (row.labelBind != null) row.label.setText(row.labelBind.get(s));
-            String value = row.bind.get(s);
-            int width = (int) Math.ceil(row.value.getPaint().measureText(value));
-            if (width > row.value.getMinWidth()) row.value.setMinWidth(width);
-            row.value.setText(value);
+            row.value.setText(row.bind.get(s));
         }
     }
 }

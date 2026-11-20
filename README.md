@@ -1,29 +1,46 @@
 # PerfMon+
 
-Android için kayan performans göstergesi. CPU, GPU, bellek, sıcaklık, batarya ve kare hızı ölçümlerini cihazın desteklediği kaynaklardan okur.
+PerfMon+, Android için kayan bir performans göstergesidir. Oyun oynarken veya başka bir uygulamayı kullanırken kare hızını, CPU ve GPU kullanımını, belleği, sıcaklığı ve pil verilerini ekranda gösterir. Kullanılabilen ölçümler cihaza göre değişir.
 
-## Kullanım
+## Kurulum
 
-**Monitörü başlat** düğmesine dokunup diğer uygulamaların üzerinde gösterme iznini verin. Göstergeyi sürükleyebilir veya **Konum** bölümünden dikey ve yatay yerleşimi ayrı ayarlayabilirsiniz. Gösterge üzerindeki iğne konumu kilitler. Kilidi Konum bölümünden açabilirsiniz. Gösterge uygulamadan, bildirimden veya Hızlı Ayarlar kutucuğundan durdurulabilir.
+1. Android 7.0 veya üzeri bir cihaza [son sürüm APK’sını](https://github.com/JrSpatt/PerfMon-PLus/releases/latest) kurun.
+2. PerfMon+’ı açıp **Monitörü başlat** düğmesine dokunun. İstendiğinde **Diğer uygulamaların üzerinde göster** iznini verin.
+3. Uygulama FPS’ini ölçmek için [Shizuku](https://shizuku.rikka.app/) servisini başlatın ve PerfMon+’a erişim izni verin.
 
-Oyun FPS’i için Shizuku’yu başlatıp PerfMon+’a izin verin. Doğrudan DUMP izni olan kurulumlar da desteklenir. İsteğe bağlı ADB komutu:
+Doğrudan DUMP izni de desteklenir. ADB ile izin vermek için şu komutu çalıştırabilirsiniz.
 
-```
+```sh
 adb shell pm grant com.spatt.perfmon android.permission.DUMP
 ```
 
-Oyun ölçümü alınamazsa erişilebilen panel verisi kullanılır. İkisi de okunamazsa ekran yenileme hızı **Hz** olarak gösterilir. Son ölçümün kaynağı **Cihaz uyumluluğu** bölümündedir.
+## FPS kaynağı
 
-## Derleme ve dağıtım
+| Kaynak | Göstergedeki etiket | Ölçüm |
+| --- | --- | --- |
+| Shizuku veya doğrudan DUMP | FPS | Öndeki uygulamanın görüntü katmanına ait kare zamanlarından hesaplanır. |
+| Ekran paneli | FPS | Sürücünün sunduğu panel ölçümüdür. Oyun kare hızından farklı olabilir. |
+| Ekran yenileme hızı | Hz | Uygulama ve panel ölçümü alınamadığında ekranın yenileme hızı gösterilir. |
 
-JDK 17 gerekir. Windows’ta yerel test APK’sı için `gradlew.bat :app:assembleDebug` çalıştırın.
+**Cihaz uyumluluğu → FPS kaynağı** satırına dokunarak kullanılan kaynağı, panel veya Hz’e geçiş nedenini ve son başarılı uygulama ölçümünü görebilirsiniz. Son ölçümün yanında uygulamanın adı, kaynak ve üzerinden geçen süre yer alır.
 
-GitHub deposunda **Settings → Secrets and variables → Actions** altında `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` ve `KEY_PASSWORD` repository secret’larını tanımlayın. İlk değer keystore dosyasının tek satır Base64 karşılığıdır.
+## Gösterge ayarları
 
-Push ve manuel Actions çalıştırmaları imzalı APK’yı **Artifacts → PerfMon-Plus** altında sunar. `v1.0` gibi bir etiket gönderildiğinde aynı çalıştırmanın doğrulanmış APK’sı GitHub Releases’a da yüklenir. İmzalama bilgileri eksikse release derlemesi hata verir.
+- **İzleme** bölümünden metrikleri seçin. Desteklenen cihazlarda CPU çekirdeklerini kümeler hâlinde gösterebilirsiniz. **Güç** pil akımını mA, **Güç (W)** gücü watt cinsinden ayrı satırlarda gösterir.
+- **Pencere** bölümündeki yenileme aralığı tüm satırlara uygulanır. Yazı boyutunu ve arka plan saydamlığını buradan ayarlayabilirsiniz.
+- **Konum** bölümünde dikey ve yatay yerleşimi ayrı kaydedebilirsiniz. Göstergeyi sürükleyip iğne simgesine dokunduğunuzda konumu sabitlenir ve dokunuşlar alttaki uygulamaya geçer.
+- Monitörü uygulamadan, bildirimden veya Hızlı Ayarlar kutucuğundan durdurabilirsiniz.
 
-## Katkılar
+## Derleme
 
-Orijinal proje LibXZR tarafından geliştirildi. [PerfMon+](https://github.com/libxzr/PerfMon-Plus) · [BSD 3-Clause](LICENSE)
+JDK 17, Android SDK 34 ve Build Tools 34.0.0 gerekir. Windows’ta proje dizininden çalıştırın.
 
-Geliştirme ve Türkçeleştirme [@al1deburdanyak](https://t.me/al1deburdanyak).
+```bat
+gradlew.bat :app:assembleDebug
+```
+
+Linux ve macOS’ta `./gradlew :app:assembleDebug` kullanın. APK, `app/build/outputs/apk/debug/` dizininde oluşturulur.
+
+## Lisans
+
+[LibXZR/PerfMon-Plus](https://github.com/libxzr/PerfMon-Plus) projesinden türetilmiştir. [BSD 3-Clause](LICENSE)

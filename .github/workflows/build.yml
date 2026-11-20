@@ -41,7 +41,7 @@ jobs:
           trap 'rm -f -- "$PERFMON_KEYSTORE"' EXIT
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$PERFMON_KEYSTORE"
           unset KEYSTORE_BASE64
-          bash ./gradlew :app:assembleRelease --no-daemon
+          bash ./gradlew :app:testDebugUnitTest :app:assembleRelease --no-daemon
           apk=app/build/outputs/apk/release/app-release.apk
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose "$apk"
           mkdir -p dist

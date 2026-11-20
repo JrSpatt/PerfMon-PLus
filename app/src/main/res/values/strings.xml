@@ -19,7 +19,8 @@
     <string name="gpu">GPU</string>
     <string name="cpu_temp">CPU sıcaklığı</string>
     <string name="ram">RAM kullanımı</string>
-    <string name="power">Güç (W)</string>
+    <string name="power">Güç</string>
+    <string name="power_watts">Güç (W)</string>
     <string name="batt_temp">Pil sıcaklığı</string>
     <string name="fps">FPS</string>
     <string name="group_clusters">Kümelere ayır</string>
@@ -69,5 +70,30 @@
     <string name="landscape">Yatay</string>
     <string name="pin_action">Göstergeyi sabitle</string>
     <string name="close_action">Monitörü durdur</string>
+    <string name="shz_disconnected">Bağlantı kesildi</string>
+    <string name="shz_retry">Yeniden bağlan</string>
+    <string name="window_open_error">Gösterge penceresi açılamadı.</string>
+    <string name="window_display_error">Göstergenin açılacağı ekran kullanılamıyor.</string>
+    <string name="fps_no_access">Uygulama ölçümü için Shizuku bağlantısı veya DUMP izni gerekli</string>
+    <string name="fps_denied">Sistem ölçüm sorgusuna izin vermedi</string>
+    <string name="fps_no_focus">Öndeki uygulama belirlenemedi</string>
+    <string name="fps_no_layer">Uygulamaya ait görüntü katmanı bulunamadı</string>
+    <string name="fps_many_layers">Ana görüntü katmanı ayırt edilemedi</string>
+    <string name="fps_no_frames">Katmandan kare zamanı alınamadı</string>
+    <string name="fps_waiting">İlk ölçüm bekleniyor</string>
+    <string name="fps_disabled">FPS ölçümü kapalı</string>
+    <string name="fps_no_source">Ölçüm kaynağı yok</string>
+    <string name="fps_last_app">Son başarılı uygulama ölçümü</string>
+    <string name="fps_last_outside">Son yedek kaynak ölçümü</string>
+    <string name="fps_no_history">Henüz ölçüm yok</string>
     <string name="idle_source">—</string>
+    <plurals name="fps_seconds_ago">
+        <item quantity="other">%1$d saniye önce</item>
+    </plurals>
+    <plurals name="fps_minutes_ago">
+        <item quantity="other">%1$d dakika önce</item>
+    </plurals>
+    <plurals name="fps_hours_ago">
+        <item quantity="other">%1$d saat önce</item>
+    </plurals>
 </resources>

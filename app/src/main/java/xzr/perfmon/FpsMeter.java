@@ -29,8 +29,6 @@ final class FpsMeter {
     private static final long RESOLVE_EVERY_MS = 3000;
     private static final long WINDOW_NS = 1_000_000_000L;
 
-    private static final Pattern ACTIVITY = Pattern.compile("ACTIVITY\\s+([A-Za-z0-9_.]+)/");
-    private static final Pattern COMPONENT = Pattern.compile("\\s([A-Za-z][A-Za-z0-9_.]+)/");
     private static final Pattern NUM = Pattern.compile("[-+]?\\d+(?:\\.\\d+)?");
 
     private static final ScheduledExecutorService KILLER =
@@ -40,34 +38,57 @@ final class FpsMeter {
                 return t;
             });
 
+    static final class Reading {
+        static final Reading IDLE = new Reading(-1, MODE_NONE, 0, null);
+        final float value;
+        final int mode, reason;
+        final String pkg;
+        final long time;
+
+        Reading(float value, int mode, int reason, String pkg) {
+            this.value = value;
+            this.mode = mode;
+            this.reason = reason;
+            this.pkg = pkg;
+            time = SystemClock.elapsedRealtime();
+        }
+
+        boolean isApp() { return mode == MODE_SHIZUKU || mode == MODE_DUMP; }
+    }
+
     private final Context ctx;
-    private final LayerSource shizuku = new LayerSource(), direct = new LayerSource();
-    int lastMode = MODE_NONE;
+    private LayerSource shizuku = new LayerSource();
+    private final LayerSource direct = new LayerSource();
     private IShellService previousService;
 
     FpsMeter(Context ctx) {
         this.ctx = ctx.getApplicationContext();
     }
 
-    float read() {
+    Reading read() {
         IShellService service = ShizukuBridge.service;
         if (service != previousService) {
-            shizuku.reset();
+            shizuku = new LayerSource();
             previousService = service;
         }
+        Reading failed = null;
         if (service != null) {
-            float f = shizuku.read(service);
-            if (f >= 0) { lastMode = MODE_SHIZUKU; return f; }
+            Reading r = shizuku.read(service, MODE_SHIZUKU);
+            if (r.isApp()) return r;
+            failed = r;
         }
         if (ctx.checkSelfPermission(PERM_DUMP) == PackageManager.PERMISSION_GRANTED) {
-            float f = direct.read(null);
-            if (f >= 0) { lastMode = MODE_DUMP; return f; }
+            Reading r = direct.read(null, MODE_DUMP);
+            if (r.isApp()) return r;
+            if (failed == null || (failed.pkg == null && r.pkg != null)) failed = r;
         }
-        float f = panelValue();
-        if (f >= 0) { lastMode = MODE_PANEL; return f; }
-        f = displayHz();
-        lastMode = f >= 0 ? MODE_HZ : MODE_NONE;
-        return f;
+        int reason = failed == null ? R.string.fps_no_access : failed.reason;
+        String pkg = failed == null ? null : failed.pkg;
+        float panel = panelValue();
+        if (panel >= 0) return new Reading(panel, MODE_PANEL, reason, pkg);
+        float hz = displayHz();
+        return hz > 0 && Float.isFinite(hz) ? new Reading(hz, MODE_HZ, reason, pkg)
+                : new Reading(-1, MODE_NONE, reason, pkg);
     }
 
     private float displayHz() {
@@ -90,91 +111,71 @@ final class FpsMeter {
     }
 
     private static final class LayerSource {
-        String layer, pkg;
-        long nextPackageCheck, nextSearch;
-        int zeros;
+        private String target, layer;
+        private int issue;
+        private long nextSearch;
 
-        void reset() {
-            layer = null;
-            pkg = null;
-            nextPackageCheck = nextSearch = 0;
-            zeros = 0;
-        }
-
-        float read(IShellService service) {
+        Reading read(IShellService service, int mode) {
+            List<String> windows = run(service, 400, 2500, "dumpsys", "window", "displays");
+            String focus = FrameLayers.windowFocus(windows);
+            if (focus == null) {
+                List<String> activities = run(service, 1000, 2500, "dumpsys", "activity", "activities");
+                focus = FrameLayers.singleActivity(activities, false);
+                if (focus == null && denied(activities))
+                    return new Reading(-1, MODE_NONE, R.string.fps_denied, null);
+                if (focus == null) focus = FrameLayers.singleActivity(
+                        run(service, 300, 2500, "dumpsys", "activity", "top"), true);
+            }
+            if (focus == null || focus.isEmpty()) {
+                target = layer = null;
+                return new Reading(-1, MODE_NONE, R.string.fps_no_focus, null);
+            }
+            String pkg = focus.substring(0, focus.indexOf('/'));
             long now = SystemClock.elapsedRealtime();
-            if (now >= nextPackageCheck) {
-                String current = topPackage(service);
-                if (!java.util.Objects.equals(current, pkg)) {
-                    pkg = current;
-                    layer = null;
-                    nextSearch = 0;
-                    zeros = 0;
-                }
-                nextPackageCheck = now + 1000;
-            }
-            if (pkg == null) return -1;
-            if (layer == null || now >= nextSearch) {
-                if (now < nextSearch) return -1;
-                nextSearch = now + RESOLVE_EVERY_MS;
-                return resolve(service);
-            }
-            float f = measure(service, layer);
-            if (f < 0 || (f == 0 && ++zeros >= 2)) {
-                layer = null;
-                nextSearch = 0;
-                nextPackageCheck = 0;
-                zeros = 0;
-            } else if (f > 0) {
-                zeros = 0;
-            }
-            return f;
-        }
+            boolean search = !focus.equals(target) || now >= nextSearch;
+            target = focus;
+            if (search) resolve(service, now);
+            if (layer == null) return new Reading(-1, MODE_NONE, issue, pkg);
 
-        private float resolve(IShellService service) {
-            Pattern own = Pattern.compile("(?:^|[^A-Za-z0-9_.])" + Pattern.quote(pkg) + "/");
-            List<String> candidates = new ArrayList<>();
-            for (String name : run(service, 0, 2500, "dumpsys", "SurfaceFlinger", "--list")) {
-                name = name.trim();
-                if (own.matcher(name).find() && !name.startsWith("Background for") && !name.startsWith("Bounds for"))
-                    candidates.add(name);
-            }
-            // Oyun yüzeyi konteyner ve dekor katmanlarından önce incelenir.
-            Collections.sort(candidates, (a, b) -> Boolean.compare(b.contains("SurfaceView"), a.contains("SurfaceView")));
-            layer = null;
-            float best = -1;
-            for (int i = 0; i < Math.min(8, candidates.size()); i++) {
-                String candidate = candidates.get(i);
-                float f = measure(service, candidate);
-                if (f > best) { best = f; layer = candidate; }
-                if (f > 0 && candidate.contains("SurfaceView")) break;
-            }
-            return best;
-        }
-
-        private String topPackage(IShellService service) {
-            String fallback = null, resumed = null;
-            for (String l : run(service, 1000, 2500, "dumpsys", "activity", "activities")) {
-                if (!l.contains("ResumedActivity")) continue;
-                Matcher m = COMPONENT.matcher(l);
-                if (m.find()) {
-                    if (l.contains("topResumedActivity")) return m.group(1);
-                    if (l.contains("mResumedActivity")) resumed = m.group(1);
-                    else fallback = m.group(1);
+            List<String> frames = latency(service);
+            float value = rate(frames, System.nanoTime());
+            if (value < 0 && !search && !denied(frames)) {
+                String old = layer;
+                resolve(service, now);
+                if (layer == null) return new Reading(-1, MODE_NONE, issue, pkg);
+                if (!old.equals(layer)) {
+                    frames = latency(service);
+                    value = rate(frames, System.nanoTime());
                 }
             }
-            if (resumed != null) return resumed;
-            if (fallback != null) return fallback;
-            String only = null;
-            for (String l : run(service, 300, 2500, "dumpsys", "activity", "top")) {
-                Matcher m = ACTIVITY.matcher(l);
-                if (!m.find()) continue;
-                String found = m.group(1);
-                if (only != null && !only.equals(found)) return null;
-                only = found;
-            }
-            return only;
+            if (value < 0) return new Reading(-1, MODE_NONE,
+                    denied(frames) ? R.string.fps_denied : R.string.fps_no_frames, pkg);
+            return new Reading(value, mode, 0, pkg);
         }
+
+        private List<String> latency(IShellService service) {
+            return run(service, 0, 2500, "dumpsys", "SurfaceFlinger", "--latency", layer);
+        }
+
+        private void resolve(IShellService service, long now) {
+            nextSearch = now + RESOLVE_EVERY_MS;
+            List<String> list = run(service, 0, 2500, "dumpsys", "SurfaceFlinger", "--list");
+            List<String> names = FrameLayers.candidates(list, target);
+            layer = FrameLayers.singleProducer(names);
+            if (layer != null) return;
+            if (names.isEmpty()) {
+                issue = denied(list) ? R.string.fps_denied : R.string.fps_no_layer;
+            } else {
+                layer = FrameLayers.visibleProducer(names,
+                        run(service, FrameLayers.HWC_LIMIT, 1500, "dumpsys", "SurfaceFlinger", "--hwclayers"));
+                issue = R.string.fps_many_layers;
+            }
+        }
+    }
+
+    private static boolean denied(List<String> lines) {
+        return !lines.isEmpty() && (lines.get(0).contains("Permission Denial")
+                || lines.get(0).contains("Permission denied"));
     }
 
     /**
@@ -183,33 +184,35 @@ final class FpsMeter {
      * bu yüzden (kare sayısı - 1) / (ilk ile son kare arası süre) kullanılır.
      * Geçersiz yanıtta -1, ekran durağansa 0 döner.
      */
-    private static float measure(IShellService service, String layerName) {
-        List<String> lines = run(service, 0, 2500, "dumpsys", "SurfaceFlinger", "--latency", layerName);
-        if (lines.size() < 2 || lines.get(0).startsWith("Permission Denial")) return -1;
-
-        long now = System.nanoTime();
+    static float rate(List<String> lines, long now) {
+        if (lines.size() < 2) return -1;
         List<Long> ts = new ArrayList<>(lines.size());
         for (int i = 1; i < lines.size(); i++) {
             String[] p = lines.get(i).trim().split("\\s+");
             if (p.length < 3) continue;
             try {
                 long t = Long.parseLong(p[1]);
-                if (t > 0 && t != Long.MAX_VALUE) ts.add(t);
+                if (t > 0 && t != Long.MAX_VALUE && t <= now) ts.add(t);
             } catch (NumberFormatException ignored) {
             }
         }
         if (ts.size() < 2) return -1; // tek kareden hız hesaplanamaz
         Collections.sort(ts);
-        long latest = ts.get(ts.size() - 1);
+        int unique = 1;
+        for (int i = 1; i < ts.size(); i++) {
+            if (!ts.get(i).equals(ts.get(unique - 1))) ts.set(unique++, ts.get(i));
+        }
+        if (unique < 2) return -1;
+        long latest = ts.get(unique - 1);
 
         // Son kare 1,2 sn'den eskiyse ekran durağandır
         if (latest <= now && now - latest > 1_200_000_000L) return 0;
 
-        int first = ts.size() - 1;
+        int first = unique - 1;
         while (first > 0 && ts.get(first - 1) > latest - WINDOW_NS) first--;
-        int n = ts.size() - first;
+        int n = unique - first;
         if (n < 2) { // son 1 sn'de tek kare: iki son kare arasından hesapla
-            long gap = latest - ts.get(ts.size() - 2);
+            long gap = latest - ts.get(unique - 2);
             return gap > 0 ? 1_000_000_000f / gap : -1;
         }
         long span = latest - ts.get(first);
@@ -217,14 +220,12 @@ final class FpsMeter {
         return (n - 1) * 1_000_000_000f / span;
     }
 
-    // ------------------------------------------------------------ süreç yardımcı
-
     private static List<String> run(IShellService service, int maxLines, int timeoutMs, String... cmd) {
         if (service == null) return runLocal(maxLines, timeoutMs, cmd);
         try {
             String out = service.exec(cmd, maxLines, timeoutMs);
             if (out != null && !out.isEmpty()) return java.util.Arrays.asList(out.split("\\n"));
-        } catch (android.os.RemoteException ignored) {
+        } catch (android.os.RemoteException | RuntimeException ignored) {
             // Sıradaki kaynak aynı örnek içinde denenir.
         }
         return Collections.emptyList();
@@ -238,11 +239,14 @@ final class FpsMeter {
             p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
             final Process fp = p;
             killer = KILLER.schedule(fp::destroy, timeoutMs, TimeUnit.MILLISECONDS);
-            BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()), 8192);
-            String l;
-            while ((l = r.readLine()) != null) {
-                out.add(l);
-                if (maxLines > 0 && out.size() >= maxLines) break;
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()), 8192)) {
+                String l;
+                int chars = 0;
+                while (out.size() < (maxLines > 0 ? maxLines : 8000) && (l = r.readLine()) != null) {
+                    chars += l.length() + 1;
+                    if (chars > 240000) break;
+                    out.add(l);
+                }
             }
         } catch (Exception ignored) {
         } finally {

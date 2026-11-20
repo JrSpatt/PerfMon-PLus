@@ -6,7 +6,7 @@ set "REMOTE=%~1"
 if not defined REMOTE set /p "REMOTE=Existing GitHub repository URL: "
 if not defined REMOTE exit /b 2
 set "RELEASE_TAG=%~2"
-if not defined RELEASE_TAG set "RELEASE_TAG=v1.0"
+if not defined RELEASE_TAG set "RELEASE_TAG=v2.0"
 git check-ref-format "refs/tags/%RELEASE_TAG%" >nul || exit /b 2
 if not "%RELEASE_TAG:~0,1%"=="v" (
   echo Release tag must start with v.
@@ -22,13 +22,13 @@ if not defined BRANCH goto :failed
 
 rem Stage only the Android app, its build files and the release workflow.
 rem The alternate working tree is the unpacked source. The user's own clone is untouched.
-git --work-tree="%SRC%" add -A -f -- app/src/main || goto :failed
+git --work-tree="%SRC%" add -A -f -- app/src/main app/src/test || goto :failed
 git --work-tree="%SRC%" add -f -- app/build.gradle app/.gitignore build.gradle settings.gradle gradle.properties gradlew gradlew.bat gradle/wrapper .github/workflows/build.yml README.md CHANGELOG.md LICENSE .gitignore deploy.cmd || goto :failed
 git --work-tree="%SRC%" update-index --chmod=+x gradlew || goto :failed
 git diff --cached --quiet
 if errorlevel 1 (
   git --no-pager diff --cached --stat
-  git commit -m "Release PerfMon+ 1.0" || goto :failed
+  git commit -m "Release PerfMon+ 2.0" || goto :failed
 )
 git show-ref --verify --quiet "refs/tags/%RELEASE_TAG%"
 if errorlevel 1 (
@@ -46,7 +46,7 @@ exit /b 0
 :check_tag
 if "%HEAD_HASH%"=="%TAG_HASH%" exit /b 0
 echo Tag %RELEASE_TAG% already points to another commit. Nothing was pushed.
-echo Run deploy.cmd again with a free tag, e.g. deploy.cmd "repository-URL" v1.0-spatt
+echo Run deploy.cmd again with a free tag, e.g. deploy.cmd "repository-URL" v2.0-build2
 exit /b 1
 
 :empty

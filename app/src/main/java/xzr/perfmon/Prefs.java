@@ -22,6 +22,7 @@ final class Prefs {
     static final String TEMP = "show_thermal";
     static final String MEM = "show_mem";
     static final String POWER = "show_power";
+    static final String POWER_WATTS = "show_power_watts";
     static final String BATT = "show_battemp";
     static final String FPS = "show_fps";
 
@@ -32,8 +33,11 @@ final class Prefs {
     static final String M4M = "show_m4m";
 
     static void init(Context c) {
-        if (sp == null)
-            sp = c.getApplicationContext().getSharedPreferences("main", Context.MODE_PRIVATE);
+        if (sp != null) return;
+        sp = c.getApplicationContext().getSharedPreferences("main", Context.MODE_PRIVATE);
+        if (!sp.contains(POWER_WATTS)) {
+            sp.edit().putBoolean(POWER_WATTS, sp.getBoolean(POWER, true)).apply();
+        }
     }
 
     static boolean on(String key, boolean def) {

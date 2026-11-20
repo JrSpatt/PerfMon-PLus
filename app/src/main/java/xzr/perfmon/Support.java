@@ -3,27 +3,34 @@ package xzr.perfmon;
 import android.content.Context;
 import android.os.BatteryManager;
 
-import java.io.File;
-
 /** Cihazda hangi verilerin okunabildiği. */
 final class Support {
-    static boolean cpuFreq, cpuLoad, gpuFreq, gpuLoad, temp, power, fps;
-    static boolean minCpuBw, cpuBw, gpuBw, llcBw, m4m;
+    private static volatile Support current = new Support();
 
-    static String gpuFreqPath;
-    static long gpuFreqDiv = 1;
-    static String gpuLoadPath;
-    static int gpuLoadKind; // 0: doğrudan yüzde, 1: "a b" oranı
+    static Support get() { return current; }
 
-    static String pMinCpuBw, pCpuBw, pGpuBw, pLlcBw, pM4m;
+    boolean cpuFreq, cpuLoad, gpuFreq, gpuLoad, temp, power;
+    boolean minCpuBw, cpuBw, gpuBw, llcBw, m4m;
+
+    String gpuFreqPath;
+    long gpuFreqDiv = 1;
+    String gpuLoadPath;
+    int gpuLoadKind; // 0: doğrudan yüzde, 1: "a b" oranı
+
+    String pMinCpuBw, pCpuBw, pGpuBw, pLlcBw, pM4m;
 
     /** Yalnızca dosya okuma yapar, süreç başlatmaz; hızlıdır. */
-    static void probe(Context ctx) {
+    static synchronized void probe(Context ctx) {
+        Support next = new Support();
+        next.detect(ctx);
+        current = next;
+    }
+
+    private void detect(Context ctx) {
         CpuTopology.probe();
         cpuFreq = Sysfs.readLong("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq") != Sysfs.NA;
         cpuLoad = probeCpuLoad();
 
-        gpuFreqPath = null;
         String[][] gf = {
                 {"/sys/kernel/gpu/gpu_clock", "1"},
                 {"/sys/class/kgsl/kgsl-3d0/devfreq/cur_freq", "1000000"},
@@ -38,7 +45,6 @@ final class Support {
         }
         gpuFreq = gpuFreqPath != null;
 
-        gpuLoadPath = null;
         if (Sysfs.readLong("/sys/kernel/gpu/gpu_busy") != Sysfs.NA) {
             gpuLoadPath = "/sys/kernel/gpu/gpu_busy";
             gpuLoadKind = 0;
@@ -68,20 +74,10 @@ final class Support {
         gpuBw = pGpuBw != null;
         llcBw = pLlcBw != null;
         m4m = pM4m != null;
-
-        fps = true; // en kötü ihtimalle ekran Hz'i gösterilir
     }
 
     private static boolean probeCpuLoad() {
         String s = Sysfs.readString("/proc/stat");
         return s != null && s.startsWith("cpu");
-    }
-
-    static boolean anyAdvanced() {
-        return minCpuBw || cpuBw || gpuBw || llcBw || m4m;
-    }
-
-    static boolean readable(String path) {
-        return new File(path).canRead();
     }
 }

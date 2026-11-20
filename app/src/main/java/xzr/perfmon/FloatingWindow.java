@@ -40,10 +40,10 @@ public class FloatingWindow extends Service {
     private Monitor monitor;
     private Point area;
     private boolean landscape, dragging;
-    private int source = FpsMeter.MODE_NONE;
+    static final FrameHistory frames = new FrameHistory();
+    static int startError;
     private float windowOpacity = 1;
 
-    static int source() { return active == null ? FpsMeter.MODE_NONE : active.source; }
 
     static int markerWidth(Context c) {
         return active == null || active.view == null || active.view.getWidth() == 0 ? Ui.dp(c, 82) : active.view.getWidth();
@@ -58,13 +58,13 @@ public class FloatingWindow extends Service {
     }
 
     static void appearance(String key, int value) {
-        if (active == null) return;
+        if (active == null || active.view == null) return;
         if (Prefs.SCALE.equals(key)) active.view.setScalePercent(value);
         else if (Prefs.ALPHA.equals(key)) active.setOpacity(value);
     }
 
     static void lockChanged() {
-        if (active == null) return;
+        if (active == null || active.view == null) return;
         active.dragging = false;
         active.applyLock();
         active.wm.updateViewLayout(active.view, active.lp);
@@ -85,6 +85,52 @@ public class FloatingWindow extends Service {
         Prefs.init(this);
         ShizukuBridge.init(this);
         startForeground(1, buildNotification());
+    }
+
+    @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            stopSelf();
+        } else if (view == null) {
+            startError = 0;
+            Support.probe(this);
+            rebuildMetrics();
+        }
+        return START_NOT_STICKY;
+    }
+
+    private void rebuildMetrics() {
+        teardown();
+        try {
+            if (wm == null) prepareWindowContext();
+            attachWindow();
+        } catch (RuntimeException e) {
+            teardown();
+            running = false;
+            active = null;
+            startError = !android.provider.Settings.canDrawOverlays(this) ? R.string.overlay_needed
+                    : e instanceof WindowManager.InvalidDisplayException ? R.string.window_display_error
+                    : R.string.window_open_error;
+            android.widget.Toast.makeText(this, startError, android.widget.Toast.LENGTH_LONG).show();
+            notifyState();
+            stopSelf();
+            return;
+        }
+        active = this;
+        running = true;
+        frames.current = FpsMeter.Reading.IDLE;
+        ShizukuBridge.setMonitoring(true);
+        monitor = new Monitor(this, s -> {
+            view.update(s);
+            int previous = frames.current.mode;
+            frames.accept(s.frame, getPackageName(), onChange != null);
+            if (previous != s.frame.mode) notifyState();
+        });
+        monitor.start();
+        notifyState();
+        requestTileUpdate();
+    }
+
+    private void prepareWindowContext() {
         overlayContext = this;
         if (Build.VERSION.SDK_INT >= 30) {
             Display display = getSystemService(DisplayManager.class).getDisplay(Display.DEFAULT_DISPLAY);
@@ -96,18 +142,7 @@ public class FloatingWindow extends Service {
         wm = (WindowManager) overlayContext.getSystemService(WINDOW_SERVICE);
     }
 
-    @Override public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
-            stopSelf();
-        } else if (view == null) {
-            Support.probe(this);
-            rebuildMetrics();
-        }
-        return START_NOT_STICKY;
-    }
-
-    private void rebuildMetrics() {
-        teardown();
+    private void attachWindow() {
         area = OverlayPosition.area(overlayContext);
         landscape = area.x > area.y;
         view = new OverlayView(overlayContext);
@@ -166,26 +201,7 @@ public class FloatingWindow extends Service {
         PointF pos = OverlayPosition.activate(landscape);
         lp.x = Math.round(pos.x * travelX());
         lp.y = Math.round(pos.y * travelY());
-        try {
-            wm.addView(view, lp);
-        } catch (RuntimeException e) {
-            view = null;
-            stopSelf();
-            return;
-        }
-        active = this;
-        running = true;
-        source = FpsMeter.MODE_NONE;
-        monitor = new Monitor(this, s -> {
-            view.update(s);
-            if (source != s.fpsMode) {
-                source = s.fpsMode;
-                notifyState();
-            }
-        });
-        monitor.start();
-        notifyState();
-        requestTileUpdate();
+        wm.addView(view, lp);
     }
 
     private void applyLock() {
@@ -290,6 +306,8 @@ public class FloatingWindow extends Service {
     public void onDestroy() {
         running = false;
         active = null;
+        ShizukuBridge.setMonitoring(false);
+        frames.current = FpsMeter.Reading.IDLE;
         teardown();
         notifyState();
         stopForeground(true);

@@ -62,7 +62,7 @@ final class CpuTopology {
                 for (String t : rel.split("\\s+")) {
                     try {
                         int id = Integer.parseInt(t);
-                        if (id < count) list.add(id);
+                        if (id >= 0 && id < count) list.add(id);
                     } catch (NumberFormatException ignored) {
                     }
                 }
@@ -74,7 +74,8 @@ final class CpuTopology {
         if (groups.isEmpty()) {
             for (int i = 0; i < count; i++) {
                 String rel = Sysfs.readString("/sys/devices/system/cpu/cpu" + i + "/cpufreq/related_cpus");
-                String key = rel == null || rel.isEmpty() ? "cpu" + i : rel;
+                if (rel == null || rel.isEmpty()) return new int[0][];
+                String key = rel;
                 List<Integer> list = groups.get(key);
                 if (list == null) {
                     list = new ArrayList<>();
@@ -84,12 +85,14 @@ final class CpuTopology {
             }
         }
 
-        // Hiçbir şey okunamazsa tek küme
-        if (groups.isEmpty()) {
-            int[] all = new int[count];
-            for (int i = 0; i < count; i++) all[i] = i;
-            return new int[][]{all};
+        boolean[] covered = new boolean[count];
+        for (List<Integer> group : groups.values()) {
+            for (int id : group) {
+                if (covered[id]) return new int[0][];
+                covered[id] = true;
+            }
         }
+        for (boolean present : covered) if (!present) return new int[0][];
 
         List<int[]> out = new ArrayList<>();
         for (List<Integer> l : groups.values()) {

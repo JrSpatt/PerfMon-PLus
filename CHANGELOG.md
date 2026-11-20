@@ -1,4 +1,18 @@
-# PerfMon+ 1.0
+# PerfMon+
+
+## 2.0
+
+- Shizuku ve DUMP ile FPS ölçümü hem düz katman adlarını hem de Android 16’daki `RequestedLayerState` biçimini destekler.
+- FPS ölçümünde odaktaki pencere ve uygulama birlikte değerlendirilir. Birden fazla yüzey ayırt edilemezse gösterge panel veya Hz kaynağına geçer.
+- **Cihaz uyumluluğu → FPS kaynağı** kullanılan kaynağı, geçiş nedenini ve son başarılı uygulama ölçümünün adını, kaynağını ve üzerinden geçen süreyi gösterir.
+- **Güç** (mA) ve **Güç (W)** bağımsız olarak açılır. İkisi seçildiğinde göstergede alt alta yer alır. Güncellemede eski Güç tercihi her iki satıra aktarılır.
+- **Kümelere ayır** seçeneği CPU ölçümlerinin altına taşındı. Küme bilgisi eksikse çekirdekler numaralarıyla gösterilir.
+- Okunamayan sensörlerde `--` gösterilir. Geçerli sıfır değerleri korunur. İçerik kısaldığında gösterge yeniden daralır.
+- CPU sıcaklığına donanım eşikleri dahil edilmez. GPU kaynakları ve birimleri birlikte güncellenir.
+- Shizuku bağlantı denemesi zaman aşımına uğrarsa veya servis koparsa monitör açıkken bağlantı yeniden denenir.
+- Başlatma ekranı gösterge açılınca arka plana geçer. Pencere açılamazsa uygulama hatayı bildirir.
+
+## 1.0
 
 - Uygulamanın paket adı `com.spatt.perfmon` oldu. Sürüm kodu 1.
 - Göstergedeki sabitleme düğmesi, simgeleri gizler ve oyun dokunuşlarının geçmesini sağlar. Kilit Konum bölümünden açılır.

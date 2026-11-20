@@ -54,9 +54,10 @@ public class ShellUserService extends IShellService.Stub {
     }
     private static boolean isMeasurement(String[] cmd) {
         if (cmd == null || cmd.length < 3 || !"dumpsys".equals(cmd[0])) return false;
+        if ("window".equals(cmd[1])) return cmd.length == 3 && "displays".equals(cmd[2]);
         if ("activity".equals(cmd[1]))
             return cmd.length == 3 && ("activities".equals(cmd[2]) || "top".equals(cmd[2]));
-        return "SurfaceFlinger".equals(cmd[1]) && ((cmd.length == 3 && "--list".equals(cmd[2]))
+        return "SurfaceFlinger".equals(cmd[1]) && ((cmd.length == 3 && ("--list".equals(cmd[2]) || "--hwclayers".equals(cmd[2])))
                 || (cmd.length == 4 && "--latency".equals(cmd[2]) && cmd[3] != null && !cmd[3].startsWith("-")));
     }
 }

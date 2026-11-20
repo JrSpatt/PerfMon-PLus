@@ -12,7 +12,6 @@ final class Snapshot {
     float powerW = Float.NaN;
     int currentMa = Integer.MIN_VALUE;
     float battTemp = Float.NaN;   // °C
-    float fps = -1;
-    int fpsMode;
+    FpsMeter.Reading frame = FpsMeter.Reading.IDLE;
     long minCpuBw = -1, cpuBw = -1, gpuBw = -1, llcBw = -1, m4m = -1;
 }

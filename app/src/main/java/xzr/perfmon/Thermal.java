@@ -21,11 +21,18 @@ final class Thermal {
             String type = Sysfs.readString(z.getPath() + "/type");
             if (type == null) continue;
             type = type.toLowerCase(Locale.US);
-            if (type.contains("cpu") || type.startsWith("tsens") || type.contains("cluster"))
+            if (isCpuSensor(type))
                 found.add(z.getPath() + "/temp");
         }
         paths = found;
         return !Float.isNaN(readMax());
+    }
+
+    static boolean isCpuSensor(String type) {
+        if (type.contains("trip") || type.contains("threshold") || type.contains("limit")
+                || type.contains("cooling") || type.endsWith("-step") || type.endsWith("-lowf"))
+            return false;
+        return !type.contains("gpu") && (type.contains("cpu") || type.contains("cluster"));
     }
 
     /** Bulunan CPU sensörlerinin en yükseği (°C); okunamazsa NaN. */
