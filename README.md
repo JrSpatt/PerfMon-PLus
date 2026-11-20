@@ -8,11 +8,6 @@ PerfMon+, Android için kayan bir performans göstergesidir. Oyun oynarken veya 
 2. PerfMon+’ı açıp **Monitörü başlat** düğmesine dokunun. İstendiğinde **Diğer uygulamaların üzerinde göster** iznini verin.
 3. Uygulama FPS’ini ölçmek için [Shizuku](https://shizuku.rikka.app/) servisini başlatın ve PerfMon+’a erişim izni verin.
 
-Windows’ta imzalı APK’yı ADB üzerinden kurmak için aşağıdaki betiği kullanabilirsiniz. Birden fazla cihaz bağlıysa APK yolundan sonra `kurulum.cmd --list` çıktısındaki cihaz seri numarasını ekleyin.
-
-```bat
-kurulum.cmd "PerfMon-Plus.apk"
-```
 
 Doğrudan DUMP izni de desteklenir. ADB ile izin vermek için şu komutu çalıştırabilirsiniz.
 
