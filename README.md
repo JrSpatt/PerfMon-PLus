@@ -9,6 +9,7 @@ PerfMon+, Android için kayan bir performans göstergesidir. Oyun oynarken veya 
 3. Uygulama FPS’ini ölçmek için [Shizuku](https://shizuku.rikka.app/) servisini başlatın ve PerfMon+’a erişim izni verin.
 
 
+
 Doğrudan DUMP izni de desteklenir. ADB ile izin vermek için şu komutu çalıştırabilirsiniz.
 
 ```sh
