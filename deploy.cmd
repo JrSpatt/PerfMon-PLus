@@ -23,7 +23,8 @@ if not defined BRANCH goto :failed
 rem Stage only the Android app, its build files and the release workflow.
 rem The alternate working tree is the unpacked source. The user's own clone is untouched.
 git --work-tree="%SRC%" add -A -f -- app/src/main app/src/test || goto :failed
-git --work-tree="%SRC%" add -f -- app/build.gradle app/.gitignore build.gradle settings.gradle gradle.properties gradlew gradlew.bat gradle/wrapper .github/workflows/build.yml README.md CHANGELOG.md LICENSE .gitignore deploy.cmd kurulum.cmd || goto :failed
+git --work-tree="%SRC%" add -f -- app/build.gradle app/.gitignore build.gradle settings.gradle gradle.properties gradlew gradlew.bat gradle/wrapper .github/workflows/build.yml README.md README.en.md CHANGELOG.md LICENSE .gitignore deploy.cmd || goto :failed
+git rm --cached --ignore-unmatch -- kurulum.cmd || goto :failed
 git --work-tree="%SRC%" update-index --chmod=+x gradlew || goto :failed
 git diff --cached --quiet
 if errorlevel 1 (

@@ -1,52 +1,52 @@
 # PerfMon+
 
-PerfMon+, Android için kayan bir performans göstergesidir. Oyun oynarken veya başka bir uygulamayı kullanırken kare hızını, CPU ve GPU kullanımını, belleği, sıcaklığı ve pil verilerini ekranda gösterir. Kullanılabilen ölçümler cihaza göre değişir.
+[English](README.en.md)
+
+PerfMon+, Android için kayan bir performans göstergesidir. Oyun oynarken veya başka bir uygulamayı kullanırken FPS, CPU ve GPU değerleri, RAM kullanımı, sıcaklık ve pil verilerini gösterir. Kullanılabilen ölçümler cihaza göre değişir.
 
 ## Kurulum
 
-1. Android 7.0 veya üzeri bir cihaza [son sürüm APK’sını](https://github.com/JrSpatt/PerfMon-PLus/releases/latest) kurun.
-2. PerfMon+’ı açıp **Monitörü başlat** düğmesine dokunun. İstendiğinde **Diğer uygulamaların üzerinde göster** iznini verin.
-3. Uygulama FPS’ini ölçmek için [Shizuku](https://shizuku.rikka.app/) servisini başlatın ve PerfMon+’a erişim izni verin.
+1. `PerfMon-Plus.apk` dosyasını indirip Android 7.0 veya üzeri cihazınıza kurun. [Son sürüm](https://github.com/JrSpatt/PerfMon-PLus/releases/latest)
+2. PerfMon+’ı açıp **Monitörü başlat** düğmesine dokunun. İstendiğinde uygulamaya diğer uygulamaların üzerinde gösterme izni verin.
 
+Öndeki uygulamanın FPS’ini ölçmek için Shizuku’yu başlatıp PerfMon+’a erişim izni verebilirsiniz. [Shizuku](https://shizuku.rikka.app/)
 
-
-Doğrudan DUMP izni de desteklenir. ADB ile izin vermek için şu komutu çalıştırabilirsiniz.
+Cihazınız destekliyorsa aynı ölçüm için ADB ile `DUMP` izni de verebilirsiniz.
 
 ```sh
 adb shell pm grant com.spatt.perfmon android.permission.DUMP
 ```
 
-## FPS kaynağı
+## FPS ölçümü
 
-| Kaynak | Göstergedeki etiket | Ölçüm |
+| Kaynak | Etiket | Gösterilen değer |
 | --- | --- | --- |
-| Shizuku veya doğrudan DUMP | FPS | Öndeki uygulamanın görüntü katmanına ait kare zamanlarından hesaplanır. |
-| Ekran paneli | FPS | Sürücünün sunduğu panel ölçümüdür. Oyun kare hızından farklı olabilir. |
-| Ekran yenileme hızı | Hz | Uygulama ve panel ölçümü alınamadığında ekranın yenileme hızı gösterilir. |
+| Shizuku veya DUMP izni | `FPS` | Öndeki uygulamanın kare sunum zamanlarından hesaplanan hız |
+| Panel sürücüsü | `FPS` | Sürücünün bildirdiği panel kare hızı |
+| Ekran | `Hz` | Uygulama ve panel ölçümü alınamadığında ekranın yenileme hızı |
 
-Bir FPS ölçümünden sonra veri bir tur kesilirse gösterge `FPS --` yazar. Kesinti sürerse ekran yenileme hızını `Hz` olarak gösterir. `0 FPS`, daha önce kare sunan görünür içerik katmanının durağan olduğunu belirtir. Ölçülen hız sıfırdan büyük ve 1 FPS’in altındaysa değer `<1` olarak görünür.
+FPS verisi bir tur kesilirse gösterge `FPS --` yazar. Kesinti sürerse `Hz` değerine geçer. Uygulama ölçümünde `0 FPS` görünür içeriğin durağan olduğunu, `<1` ise saniyede bir kareden az ölçüldüğünü belirtir.
 
-**Cihaz uyumluluğu → FPS kaynağı** satırına dokunarak kullanılan kaynağı, panel veya Hz’e geçiş nedenini ve son başarılı uygulama ölçümünü görebilirsiniz. Son ölçümün yanında uygulamanın adı, kaynak ve üzerinden geçen süre yer alır.
+**Cihaz uyumluluğu → FPS kaynağı** bölümünde kullanılan kaynağı, panel veya Hz’e geçiş nedenini ve son başarılı uygulama ölçümünü görebilirsiniz.
 
 ## Gösterge ayarları
 
-- **İzleme** bölümünden metrikleri seçin. Desteklenen cihazlarda CPU çekirdeklerini kümeler hâlinde gösterebilirsiniz. **Güç** pil akımını mA, **Güç (W)** gücü watt cinsinden ayrı satırlarda gösterir.
-- **Pencere** bölümündeki yenileme aralığı tüm satırlara uygulanır. Yazı boyutunu ve arka plan saydamlığını buradan ayarlayabilirsiniz.
-- **Konum** bölümünde dikey ve yatay yerleşimi ayrı kaydedebilirsiniz. Göstergeyi sürükleyip iğne simgesine dokunduğunuzda konumu sabitlenir ve dokunuşlar alttaki uygulamaya geçer.
-- Monitörü uygulamadan, bildirimden veya Hızlı Ayarlar kutucuğundan durdurabilirsiniz.
+- **İzleme** bölümünden göstergede yer alacak değerleri seçin. CPU çekirdeklerini kümelere ayırabilir, pil akımını (**Güç**, mA) ve pil gücünü (**Güç (W)**) ayrı ayrı açabilirsiniz.
+- **Pencere** bölümünden yazı boyutunu, saydamlığı ve tüm satırların yenileme aralığını ayarlayın.
+- **Konum** bölümünde dikey ve yatay ekran için ayrı konum kaydedebilirsiniz. Göstergedeki iğneye dokunduğunuzda konum sabitlenir ve dokunuşlar alttaki uygulamaya geçer.
+- Göstergeyi uygulamadan, bildirimden veya Hızlı Ayarlar kutucuğundan durdurabilirsiniz.
 
 ## Derleme
 
-JDK 17, Android SDK 34 ve Build Tools 34.0.0 gerekir. Windows’ta proje dizininden çalıştırın.
+JDK 17, Android SDK Platform 34 ve Build Tools 34.0.0 gerekir. Proje klasöründe işletim sisteminize uygun komutu çalıştırın.
 
-```bat
-gradlew.bat :app:assembleDebug
-```
+| Sistem | Komut |
+| --- | --- |
+| Windows (CMD) | `gradlew.bat :app:assembleDebug` |
+| Linux / macOS | `./gradlew :app:assembleDebug` |
 
-Linux ve macOS’ta `./gradlew :app:assembleDebug` kullanın. APK, `app/build/outputs/apk/debug/` dizininde oluşturulur.
-
-İmzalı sürümü Windows’ta kaynaktan derleyip kurmak için `PERFMON_KEYSTORE`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` ve `KEY_PASSWORD` ortam değişkenlerini ayarlayıp `kurulum.cmd --build` çalıştırın. Mevcut kurulumu güncellerken aynı imzalama anahtarını kullanın.
+APK, `app/build/outputs/apk/debug/` klasörüne yazılır.
 
 ## Lisans
 
-[LibXZR/PerfMon-Plus](https://github.com/libxzr/PerfMon-Plus) projesinden türetilmiştir. [BSD 3-Clause](LICENSE)
+LibXZR’nin PerfMon+ projesinden türetilmiştir. [Orijinal proje](https://github.com/libxzr/PerfMon-Plus) · [BSD 3-Clause lisansı](LICENSE)

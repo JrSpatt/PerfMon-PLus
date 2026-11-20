@@ -6,6 +6,7 @@
 - Uygulama ve panel FPS ölçümü bir tur kesildiğinde göstergede `FPS --` görünür. Kesinti sürerse ekranın yenileme hızı gösterilir.
 - Sabitlenmiş göstergede dört haneli CPU frekansına yer ayrıldı. `999 MHz` ile `1000 MHz` arasındaki geçişlerde pencere genişliği sabit kalır.
 - İzleme bölümünde CPU, Kümelere ayır, Güç (mA) ve Güç (W) seçenekleri ortak iki sütunlu düzende yer alır.
+- Kullanım ve derleme belgelerine İngilizce README eklendi.
 
 ## 2.0
 
