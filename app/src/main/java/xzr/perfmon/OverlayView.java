@@ -17,6 +17,12 @@ import java.util.Locale;
 
 /** Ekranda süzülen monitör penceresinin içeriği. */
 final class OverlayView extends LinearLayout {
+    private static String frameValue(float value) {
+        if (value < 0) return "--";
+        if (value > 0 && value < 1) return "<1";
+        return String.format(Locale.US, "%.0f", value);
+    }
+
     private interface Bind {
         String get(Snapshot s);
     }
@@ -35,11 +41,13 @@ final class OverlayView extends LinearLayout {
 
     final ImageButton pin, close;
     private final List<Row> rows = new ArrayList<>();
+    private final List<TextView> cpuValues = new ArrayList<>();
     private final TextView title;
     private final GradientDrawable background = new GradientDrawable();
     private final Support support = Support.get();
     private final boolean showFreq, showLoad;
     private float sp;
+    private boolean locked;
 
     OverlayView(Context c) {
         super(c);
@@ -77,6 +85,8 @@ final class OverlayView extends LinearLayout {
     }
 
     void setLocked(boolean locked) {
+        this.locked = locked;
+        updateCpuWidth();
         pin.setVisibility(locked ? GONE : VISIBLE);
         close.setVisibility(locked ? GONE : VISIBLE);
     }
@@ -100,11 +110,19 @@ final class OverlayView extends LinearLayout {
             r.label.setPadding(0, 0, Ui.dp(c, 5 * scale), 0);
             r.value.setMinWidth((int) Math.ceil(r.value.getPaint().measureText("000")));
         }
+        updateCpuWidth();
+    }
+
+    private void updateCpuWidth() {
+        String sample = locked && showFreq ? (showLoad ? "0000 MHz 100%" : "0000 MHz") : "000";
+        for (TextView value : cpuValues) {
+            value.setMinWidth((int) Math.ceil(value.getPaint().measureText(sample)));
+        }
     }
 
     private void buildRows(Context c) {
         if (Prefs.on(Prefs.FPS, true)) {
-            addRow(c, null, s -> s.frame.value < 0 ? "--" : String.format(Locale.US, "%.0f", s.frame.value),
+            addRow(c, null, s -> frameValue(s.frame.value),
                     s -> s.frame.mode == FpsMeter.MODE_HZ ? "Hz" : "FPS");
         }
 
@@ -114,12 +132,12 @@ final class OverlayView extends LinearLayout {
             if (group) {
                 for (int k = 0; k < topo.clusters.length; k++) {
                     final int[] cpus = topo.clusters[k];
-                    addRow(c, topo.labels[k], s -> clusterText(s, cpus), null);
+                    cpuValues.add(addRow(c, topo.labels[k], s -> clusterText(s, cpus), null));
                 }
             } else {
                 for (int i = 0; i < topo.count; i++) {
                     final int[] cpu = {i};
-                    addRow(c, "CPU " + i, s -> clusterText(s, cpu), null);
+                    cpuValues.add(addRow(c, "CPU " + i, s -> clusterText(s, cpu), null));
                 }
             }
         }
@@ -180,7 +198,7 @@ final class OverlayView extends LinearLayout {
     }
 
     /** labelBind verilirse etiket her turda ondan hesaplanır (FPS / Hz geçişi için). */
-    private void addRow(Context c, String label, Bind valueBind, Bind labelBind) {
+    private TextView addRow(Context c, String label, Bind valueBind, Bind labelBind) {
         LinearLayout line = new LinearLayout(c);
         TextView l = Ui.text(c, label == null ? "" : label, sp, Theme.MUTED);
         l.setTypeface(Typeface.MONOSPACE);
@@ -196,6 +214,7 @@ final class OverlayView extends LinearLayout {
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         addView(line);
         rows.add(new Row(l, v, valueBind, labelBind));
+        return v;
     }
 
     void update(Snapshot s) {

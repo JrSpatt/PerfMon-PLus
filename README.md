@@ -8,6 +8,12 @@ PerfMon+, Android için kayan bir performans göstergesidir. Oyun oynarken veya 
 2. PerfMon+’ı açıp **Monitörü başlat** düğmesine dokunun. İstendiğinde **Diğer uygulamaların üzerinde göster** iznini verin.
 3. Uygulama FPS’ini ölçmek için [Shizuku](https://shizuku.rikka.app/) servisini başlatın ve PerfMon+’a erişim izni verin.
 
+Windows’ta imzalı APK’yı ADB üzerinden kurmak için aşağıdaki betiği kullanabilirsiniz. Birden fazla cihaz bağlıysa APK yolundan sonra `kurulum.cmd --list` çıktısındaki cihaz seri numarasını ekleyin.
+
+```bat
+kurulum.cmd "PerfMon-Plus.apk"
+```
+
 Doğrudan DUMP izni de desteklenir. ADB ile izin vermek için şu komutu çalıştırabilirsiniz.
 
 ```sh
@@ -21,6 +27,8 @@ adb shell pm grant com.spatt.perfmon android.permission.DUMP
 | Shizuku veya doğrudan DUMP | FPS | Öndeki uygulamanın görüntü katmanına ait kare zamanlarından hesaplanır. |
 | Ekran paneli | FPS | Sürücünün sunduğu panel ölçümüdür. Oyun kare hızından farklı olabilir. |
 | Ekran yenileme hızı | Hz | Uygulama ve panel ölçümü alınamadığında ekranın yenileme hızı gösterilir. |
+
+Bir FPS ölçümünden sonra veri bir tur kesilirse gösterge `FPS --` yazar. Kesinti sürerse ekran yenileme hızını `Hz` olarak gösterir. `0 FPS`, daha önce kare sunan görünür içerik katmanının durağan olduğunu belirtir. Ölçülen hız sıfırdan büyük ve 1 FPS’in altındaysa değer `<1` olarak görünür.
 
 **Cihaz uyumluluğu → FPS kaynağı** satırına dokunarak kullanılan kaynağı, panel veya Hz’e geçiş nedenini ve son başarılı uygulama ölçümünü görebilirsiniz. Son ölçümün yanında uygulamanın adı, kaynak ve üzerinden geçen süre yer alır.
 
@@ -40,6 +48,8 @@ gradlew.bat :app:assembleDebug
 ```
 
 Linux ve macOS’ta `./gradlew :app:assembleDebug` kullanın. APK, `app/build/outputs/apk/debug/` dizininde oluşturulur.
+
+İmzalı sürümü Windows’ta kaynaktan derleyip kurmak için `PERFMON_KEYSTORE`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` ve `KEY_PASSWORD` ortam değişkenlerini ayarlayıp `kurulum.cmd --build` çalıştırın. Mevcut kurulumu güncellerken aynı imzalama anahtarını kullanın.
 
 ## Lisans
 

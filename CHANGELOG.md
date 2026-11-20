@@ -1,5 +1,12 @@
 # PerfMon+
 
+## 2.1
+
+- FPS ölçümü, odaktaki uygulamanın ana penceresini ve görünür içerik katmanlarını izler. Chrome ve oyunlarda kareler başka bir katmana geçtiğinde seçim yenilenir. Durağanlık doğrulandığında `0 FPS`, ölçülen hız saniyede bir karenin altındaysa `<1` gösterilir.
+- Uygulama ve panel FPS ölçümü bir tur kesildiğinde göstergede `FPS --` görünür. Kesinti sürerse ekranın yenileme hızı gösterilir.
+- Sabitlenmiş göstergede dört haneli CPU frekansına yer ayrıldı. `999 MHz` ile `1000 MHz` arasındaki geçişlerde pencere genişliği sabit kalır.
+- İzleme bölümünde CPU, Kümelere ayır, Güç (mA) ve Güç (W) seçenekleri ortak iki sütunlu düzende yer alır.
+
 ## 2.0
 
 - Shizuku ve DUMP ile FPS ölçümü hem düz katman adlarını hem de Android 16’daki `RequestedLayerState` biçimini destekler.

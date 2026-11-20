@@ -38,6 +38,11 @@ public class ShellUserService extends IShellService.Stub {
             killer.setDaemon(true);
             killer.start();
             BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()), 8192);
+            if ("--hwclayers".equals(cmd[2])) {
+                try (BufferedReader table = r) {
+                    return android.text.TextUtils.join("\n", FrameLayers.readHwc(table, maxLines));
+                }
+            }
             String l;
             int n = 0;
             while ((l = r.readLine()) != null) {

@@ -218,37 +218,25 @@ public class MainActivity extends Activity {
         Runnable r = this::onSettingChanged;
 
         Support support = Support.get();
-        card.addView(Ui.toggle(c, getString(R.string.fps), Prefs.FPS, true, r));
-        if (support.cpuFreq || support.cpuLoad) {
-            LinearLayout cpu = new LinearLayout(c);
-            cpu.setOrientation(LinearLayout.VERTICAL);
-            cpu.addView(Ui.text(c, "CPU", 13, Theme.MUTED));
-            java.util.List<View> cpuMetrics = new java.util.ArrayList<>();
-            if (support.cpuFreq)
-                cpuMetrics.add(Ui.toggle(c, getString(R.string.cpu_freq), Prefs.CPUFREQ, true, r));
-            if (support.cpuLoad)
-                cpuMetrics.add(Ui.toggle(c, getString(R.string.cpu_load), Prefs.CPULOAD, true, r));
-            cpu.addView(Ui.grid(c, cpuMetrics, 2));
-            if (CpuTopology.get().clusters.length > 1) {
-                Switch group = Ui.toggle(c, getString(R.string.group_clusters), Prefs.GROUP, true, r);
-                group.setPadding(Ui.dp(c, 16), 0, 0, 0);
-                cpu.addView(group);
-            }
-            card.addView(cpu);
-        }
-
         java.util.List<View> items = new java.util.ArrayList<>();
+        items.add(Ui.toggle(c, getString(R.string.fps), Prefs.FPS, true, r));
+        if (support.cpuFreq)
+            items.add(Ui.toggle(c, getString(R.string.cpu_freq), Prefs.CPUFREQ, true, r));
+        if (support.cpuLoad)
+            items.add(Ui.toggle(c, getString(R.string.cpu_load), Prefs.CPULOAD, true, r));
+        if ((support.cpuFreq || support.cpuLoad) && CpuTopology.get().clusters.length > 1)
+            items.add(Ui.toggle(c, getString(R.string.group_clusters), Prefs.GROUP, true, r));
         if (support.gpuFreq || support.gpuLoad)
             items.add(Ui.toggle(c, getString(R.string.gpu), Prefs.GPU, true, r));
         if (support.temp)
             items.add(Ui.toggle(c, getString(R.string.cpu_temp), Prefs.TEMP, true, r));
         items.add(Ui.toggle(c, getString(R.string.ram), Prefs.MEM, true, r));
+        if (support.power) {
+            items.add(Ui.toggle(c, getString(R.string.power), Prefs.POWER, true, r));
+            items.add(Ui.toggle(c, getString(R.string.power_watts), Prefs.POWER_WATTS, true, r));
+        }
         items.add(Ui.toggle(c, getString(R.string.batt_temp), Prefs.BATT, true, r));
         card.addView(Ui.grid(c, items, 2));
-        if (support.power) {
-            card.addView(Ui.toggle(c, getString(R.string.power), Prefs.POWER, true, r));
-            card.addView(Ui.toggle(c, getString(R.string.power_watts), Prefs.POWER_WATTS, true, r));
-        }
         return card;
     }
 
